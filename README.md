@@ -16,6 +16,32 @@ for real or is explicitly reported as `not_implemented`; nothing is faked.
 - **Tests** (`backend/tests/`): exercise the real app + real temp database
   via FastAPI's TestClient.
 
+## What exists in Phase 2 (adds to Phase 1)
+
+- **AI Provider Manager** (`backend/app/ai_providers/`): real Claude and
+  Gemini adapters behind one `AIProvider` interface. Adding OpenAI or a
+  local model later means writing one new adapter class -- no changes to
+  the manager or (later) the orchestrator.
+- Sensitivity-gated routing: every request carries a `Sensitivity` level
+  (PUBLIC/INTERNAL/SENSITIVE/PRIVATE). A provider is only ever used for a
+  request if explicitly authorized for that level -- see
+  `AI_*_AUTHORIZED_SENSITIVITIES` in `.env.example`. Fallback is only
+  attempted if the fallback provider is *also* authorized; otherwise the
+  request fails rather than silently using an unauthorized provider.
+- Timeout + retry (exponential backoff) per provider, then fallback.
+- `/api/health` now reports real Claude/Gemini status (`ok` /
+  `unauthenticated` / `unreachable` / `not_configured`) via a live API
+  call, cached for 60s to avoid hitting provider APIs on every poll.
+
+**No orchestrator or real tool execution yet** -- Phase 2 is the provider
+layer only, exercised directly by tests and the health endpoint.
+
+## Configuring AI providers
+
+Copy `.env.example` to `.env` and set at least one of `ANTHROPIC_API_KEY`
+/ `GEMINI_API_KEY`. Full variable reference is documented inline in
+`.env.example`. Restart the backend after changing `.env`.
+
 ## Prerequisites (Windows)
 
 Install these first:
