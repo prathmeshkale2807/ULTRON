@@ -1,0 +1,94 @@
+"""
+Phase 1 test suite.
+
+These tests exercise the real FastAPI app against a real (temp-file)
+SQLite database via TestClient -- nothing here is mocked. They verify
+exactly the things the Phase 1 completion report claims work:
+
+  1. The service starts without errors.
+  2. The root endpoint responds.
+  3. /api/health responds and proves a real DB write+read round-trip.
+  4. Components not yet built are honestly reported as not_implemented,
+     never faked as "ok".
+"""
+
+from __future__ import annotations
+
+import os
+import tempfile
+from pathlib import Path
+
+import pytest
+
+
+@pytest.fixture()
+def client(monkeypatch, tmp_path: Path):
+    # Point the app at an isolated temp SQLite DB + log dir for this test
+    # run, so tests never touch a developer's real ./data directory and
+    # tests are independent of each other.
+    db_file = tmp_path / "test_ultron.db"
+    log_dir = tmp_path / "logs"
+
+    monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file}")
+    monkeypatch.setenv("LOG_DIR", str(log_dir))
+    monkeypatch.setenv("ENVIRONMENT", "test")
+
+    # Settings is lru_cache'd -- clear it so the env vars above take effect.
+    from app.core.config import get_settings
+
+    get_settings.cache_clear()
+
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+
+    with TestClient(app) as test_client:
+        yield test_client
+
+    get_settings.cache_clear()
+
+
+def test_root_endpoint_responds(client):
+    response = client.get("/")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "running"
+
+
+def test_health_endpoint_reports_real_database(client):
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["service"] == "ULTRON Core Service"
+    components = {c["name"]: c for c in body["components"]}
+
+    # The database component must be reported as genuinely working --
+    # this is the one real capability Phase 1 claims to have.
+    assert components["database"]["status"] == "ok"
+    assert "last event id" in components["database"]["detail"]
+
+    # Everything not yet built must be honest about it -- this is the
+    # "no fake capabilities" rule, enforced by a test, not just a promise.
+    for name in (
+        "ai_provider_manager",
+        "device_manager",
+        "voice_engine",
+        "android_companion",
+        "windows_control",
+    ):
+        assert components[name]["status"] == "not_implemented"
+
+
+def test_health_endpoint_db_survives_multiple_calls(client):
+    # Two calls should each add a row and both should succeed --
+    # proves the session lifecycle (get_db dependency) isn't leaking
+    # or breaking across requests.
+    first = client.get("/api/health")
+    second = client.get("/api/health")
+    assert first.status_code == 200
+    assert second.status_code == 200
+
+    first_id = int(first.json()["components"][0]["detail"].split("=")[1])
+    second_id = int(second.json()["components"][0]["detail"].split("=")[1])
+    assert second_id == first_id + 1

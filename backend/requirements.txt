@@ -1,0 +1,14 @@
+# ULTRON backend -- Phase 1 dependencies only.
+# Later phases add: anthropic/openai/google-genai SDKs, pywinauto,
+# playwright, deepgram-sdk, elevenlabs, picovoice, alembic, etc.
+# Phase 1 stays minimal on purpose -- only what the scaffolding needs.
+
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+pydantic==2.9.2
+pydantic-settings==2.5.2
+sqlalchemy==2.0.35
+
+# Testing
+pytest==8.3.3
+httpx==0.27.2

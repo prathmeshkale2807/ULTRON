@@ -1,0 +1,27 @@
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/data/
+*.pyc
+
+# Env / secrets
+.env
+*.env
+!.env.example
+
+# Node / frontend
+apps/desktop/node_modules/
+apps/desktop/dist/
+
+# Tauri / Rust
+apps/desktop/src-tauri/target/
+
+# Logs
+*.log
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
