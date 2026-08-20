@@ -23,7 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api import api_router
 from app.core.config import get_settings
-from app.core.database import init_db
+from app.core.database import schema_is_current
 from app.core.logging_config import configure_logging, get_logger
 
 settings = get_settings()
@@ -34,8 +34,14 @@ logger = get_logger("main")
 async def lifespan(app: FastAPI):
     configure_logging()
     logger.info("ULTRON Core Service starting (environment=%s)", settings.environment)
-    init_db()
-    logger.info("Database ready at %s", settings.database_url)
+    if not schema_is_current():
+        logger.warning(
+            "Database schema is missing or out of date. Run 'alembic upgrade head' "
+            "in backend/ before relying on this service -- it will NOT create tables "
+            "for you (create_all() is not used as a migration mechanism)."
+        )
+    else:
+        logger.info("Database schema up to date at %s", settings.database_url)
     yield
     logger.info("ULTRON Core Service shutting down")
 

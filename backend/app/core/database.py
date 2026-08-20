@@ -7,15 +7,17 @@ memory, audit log) get added as each owning phase lands -- Phase 1 only
 proves the database layer itself works end-to-end via one real table
 (SystemEvent) exercised by the health-check endpoint.
 
-Migrations: Alembic is introduced in the phase that first needs a schema
-change against real user data (Phase 5, Task Manager). Phase 1 uses
-`Base.metadata.create_all()` since there's no data yet to migrate.
+Migrations: schema changes are owned exclusively by Alembic (see
+backend/alembic/ + alembic.ini). `Base.metadata.create_all()` is never
+used to stand up the app's real database -- only the test suite uses it,
+against an isolated temp DB, so tests don't depend on Alembic being run.
 """
 
 from __future__ import annotations
 
 from collections.abc import Generator
 from datetime import datetime, timezone
+from pathlib import Path
 
 from sqlalchemy import DateTime, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
@@ -57,8 +59,37 @@ class SystemEvent(Base):
     )
 
 
-def init_db() -> None:
-    """Create tables that don't exist yet. Idempotent."""
+def schema_is_current() -> bool:
+    """True if the DB is migrated to the latest Alembic revision.
+
+    Read-only check -- never creates or alters anything. App startup
+    uses this to warn (not auto-fix) when 'alembic upgrade head' hasn't
+    been run.
+    """
+    from alembic.config import Config
+    from alembic.script import ScriptDirectory
+    from sqlalchemy import inspect
+
+    backend_dir = Path(__file__).resolve().parents[2]
+    alembic_cfg = Config(str(backend_dir / "alembic.ini"))
+    script = ScriptDirectory.from_config(alembic_cfg)
+    head_revision = script.get_current_head()
+
+    inspector = inspect(engine)
+    if "alembic_version" not in inspector.get_table_names():
+        return False
+
+    with engine.connect() as conn:
+        row = conn.exec_driver_sql("SELECT version_num FROM alembic_version").fetchone()
+    current_revision = row[0] if row else None
+
+    return current_revision == head_revision
+
+
+def create_all_for_tests() -> None:
+    """Test-only helper. Production schema is owned by Alembic migrations
+    (see backend/alembic/) -- this exists solely so the test suite can
+    stand up an isolated temp SQLite DB without running migrations."""
     Base.metadata.create_all(bind=engine)
 
 

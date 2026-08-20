@@ -20,7 +20,7 @@ for real or is explicitly reported as `not_implemented`; nothing is faked.
 
 Install these first:
 
-1. **Python 3.11+** — https://www.python.org/downloads/ (check "Add to PATH")
+1. **Python 3.12+** — https://www.python.org/downloads/ (check "Add to PATH")
 2. **Node.js 20+ LTS** — https://nodejs.org/
 3. **Rust toolchain** (required by Tauri) — https://rustup.rs/
    - After installing, restart your terminal and run `rustc --version` to confirm.
@@ -73,6 +73,19 @@ else listed as `not_implemented`.
 
 ```powershell
 .\scripts\run-tests.ps1
+```
+
+## Database migrations
+
+Schema changes are owned by Alembic, not `create_all()`. `dev-backend.ps1`
+runs `alembic upgrade head` automatically before starting the server. To
+run it manually or create a new migration later:
+
+```powershell
+cd backend
+.venv\Scripts\Activate.ps1
+alembic upgrade head                          # apply migrations
+alembic revision --autogenerate -m "message"  # create a new one (future phases)
 ```
 
 ## Known limitation of this scaffold

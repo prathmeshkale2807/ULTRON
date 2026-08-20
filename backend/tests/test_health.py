@@ -14,8 +14,6 @@ exactly the things the Phase 1 completion report claims work:
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -37,6 +35,13 @@ def client(monkeypatch, tmp_path: Path):
     from app.core.config import get_settings
 
     get_settings.cache_clear()
+
+    # App startup deliberately no longer runs create_all() (that's not a
+    # real migration mechanism) -- tests stand up their own isolated temp
+    # schema directly instead of depending on Alembic having been run.
+    from app.core.database import create_all_for_tests
+
+    create_all_for_tests()
 
     from fastapi.testclient import TestClient
 
