@@ -10,6 +10,10 @@ sqlalchemy==2.0.35
 alembic==1.13.3
 jsonschema==4.23.0
 
+# Windows PC Control (Phase 6)
+psutil==6.1.1
+Pillow==11.1.0
+
 # AI providers (Phase 2)
 anthropic==0.39.0
 google-genai==0.3.0

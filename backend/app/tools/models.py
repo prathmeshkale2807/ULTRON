@@ -55,6 +55,9 @@ class PermissionCategory(str, Enum):
     COMMUNICATION = "communication"  # email, calendar, messaging
     DEVICE_CONTROL = "device_control"  # PC/Android input, power, etc.
     FINANCIAL = "financial"
+    PC_READ = "pc_read"
+    PC_PROCESS_CONTROL = "pc_process_control"
+    PC_SCREEN_CAPTURE = "pc_screen_capture"
     OTHER = "other"
 
 

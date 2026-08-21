@@ -44,6 +44,11 @@ async def lifespan(app: FastAPI):
     else:
         logger.info("Database schema up to date at %s", settings.database_url)
 
+    # Register Windows Tools (Phase 6)
+    from app.windows.tools import register_windows_tools
+    from app.tools.registry import get_registry
+    register_windows_tools(get_registry())
+
     # Start the task worker pool (Phase 5).
     from app.tasks.worker import get_task_worker
 
