@@ -24,7 +24,16 @@ logger = get_logger("ai_providers.gemini")
 class GeminiProvider(AIProvider):
     def __init__(self, config):
         super().__init__(config)
-        self._client = genai.Client(api_key=config.api_key)
+        # The Google SDK can raise immediately when no API key is supplied.
+        # Keep the provider constructible so health checks can honestly
+        # report `not_configured` instead of dropping the provider.
+        self._client = genai.Client(api_key=config.api_key) if config.api_key else None
+
+    @property
+    def client(self):
+        if self._client is None:
+            raise ProviderError("Gemini API key is not configured")
+        return self._client
 
     def _to_contents(self, request: ProviderRequest) -> list[dict]:
         role_map = {"user": "user", "assistant": "model"}
@@ -55,7 +64,7 @@ class GeminiProvider(AIProvider):
         )
         try:
             response = await asyncio.wait_for(
-                self._client.aio.models.generate_content(
+                self.client.aio.models.generate_content(
                     model=self.config.model,
                     contents=self._to_contents(request),
                     config=config,
@@ -83,7 +92,7 @@ class GeminiProvider(AIProvider):
             max_output_tokens=request.max_tokens,
         )
         try:
-            async for chunk in await self._client.aio.models.generate_content_stream(
+            async for chunk in await self.client.aio.models.generate_content_stream(
                 model=self.config.model,
                 contents=self._to_contents(request),
                 config=config,
@@ -101,7 +110,7 @@ class GeminiProvider(AIProvider):
         )
         try:
             response = await asyncio.wait_for(
-                self._client.aio.models.generate_content(
+                self.client.aio.models.generate_content(
                     model=self.config.model,
                     contents=self._to_contents(request),
                     config=config,
@@ -140,7 +149,7 @@ class GeminiProvider(AIProvider):
             return ProviderHealth(self.name, "not_configured", "No API key set")
         try:
             await asyncio.wait_for(
-                self._client.aio.models.generate_content(
+                self.client.aio.models.generate_content(
                     model=self.config.model,
                     contents=[{"role": "user", "parts": [{"text": "ping"}]}],
                     config=genai_types.GenerateContentConfig(max_output_tokens=1),

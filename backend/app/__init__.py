@@ -1,3 +1,3 @@
 """ULTRON backend application package."""
 
-__version__ = "0.1.0-phase1"
+__version__ = "0.3.0-phase3"

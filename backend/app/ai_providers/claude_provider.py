@@ -24,7 +24,23 @@ logger = get_logger("ai_providers.claude")
 class ClaudeProvider(AIProvider):
     def __init__(self, config):
         super().__init__(config)
-        self._client = anthropic.AsyncAnthropic(api_key=config.api_key, timeout=config.timeout_seconds)
+        # Do not construct the SDK client without credentials. Some SDK
+        # versions raise during construction, which would make health checks
+        # fail instead of reporting the honest `not_configured` state.
+        self._client = (
+            anthropic.AsyncAnthropic(
+                api_key=config.api_key,
+                timeout=config.timeout_seconds,
+            )
+            if config.api_key
+            else None
+        )
+
+    @property
+    def client(self):
+        if self._client is None:
+            raise ProviderError("Claude API key is not configured")
+        return self._client
 
     def _to_anthropic_messages(self, request: ProviderRequest) -> list[dict]:
         return [{"role": m.role, "content": m.content} for m in request.messages if m.role != "system"]
@@ -38,7 +54,7 @@ class ClaudeProvider(AIProvider):
     async def generate(self, request: ProviderRequest) -> ProviderResponse:
         try:
             response = await asyncio.wait_for(
-                self._client.messages.create(
+                self.client.messages.create(
                     model=self.config.model,
                     max_tokens=request.max_tokens,
                     system=request.system_prompt or anthropic.NOT_GIVEN,
@@ -63,7 +79,7 @@ class ClaudeProvider(AIProvider):
 
     async def stream(self, request: ProviderRequest):
         try:
-            async with self._client.messages.stream(
+            async with self.client.messages.stream(
                 model=self.config.model,
                 max_tokens=request.max_tokens,
                 system=request.system_prompt or anthropic.NOT_GIVEN,
@@ -77,7 +93,7 @@ class ClaudeProvider(AIProvider):
     async def tool_call(self, request: ProviderRequest) -> ProviderResponse:
         try:
             response = await asyncio.wait_for(
-                self._client.messages.create(
+                self.client.messages.create(
                     model=self.config.model,
                     max_tokens=request.max_tokens,
                     system=request.system_prompt or anthropic.NOT_GIVEN,
@@ -111,7 +127,7 @@ class ClaudeProvider(AIProvider):
             return ProviderHealth(self.name, "not_configured", "No API key set")
         try:
             await asyncio.wait_for(
-                self._client.messages.create(
+                self.client.messages.create(
                     model=self.config.model,
                     max_tokens=1,
                     messages=[{"role": "user", "content": "ping"}],

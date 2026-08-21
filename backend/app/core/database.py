@@ -19,7 +19,7 @@ from collections.abc import Generator
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import DateTime, Integer, String, create_engine
+from sqlalchemy import Boolean, DateTime, Integer, String, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.core.config import get_settings
@@ -55,6 +55,70 @@ class SystemEvent(Base):
     event_type: Mapped[str] = mapped_column(String(64))
     detail: Mapped[str] = mapped_column(String(512), default="")
     created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class PermissionRecord(Base):
+    """Persistent (not session-scoped) permission grants/denials.
+
+    Only ever stores a category/device/tool name and a granted flag --
+    see app/permissions/store.py's module docstring for why secrets can
+    never land in this table even by accident. Session-scoped grants are
+    intentionally NOT stored here (see app/permissions/store.py); they
+    live in-memory for the life of the process, since a session grant is
+    defined to not outlive it.
+    """
+
+    __tablename__ = "permission_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    category: Mapped[str] = mapped_column(String(64), index=True)
+    # Optional narrowing: a persistent grant/denial can be scoped to one
+    # tool name and/or one device type; NULL means "the whole category".
+    tool_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    device: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    granted: Mapped[bool] = mapped_column(Boolean)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+
+
+class AuditLogEntry(Base):
+    """Append-only record of every tool-decision the Safety Gate and
+    Executor make. Never holds API keys, passwords, tokens, or other
+    secrets -- see app/audit/log.py's redaction helper, which is the
+    only code path permitted to write rows into this table."""
+
+    __tablename__ = "audit_log_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    requested_action: Mapped[str] = mapped_column(String(256))
+    tool_name: Mapped[str] = mapped_column(String(128), index=True)
+    risk_level: Mapped[str] = mapped_column(String(16))
+    permission_result: Mapped[str] = mapped_column(String(32))
+    confirmation_result: Mapped[str] = mapped_column(String(32))
+    execution_result: Mapped[str] = mapped_column(String(32))
+    verification_result: Mapped[str] = mapped_column(String(32))
+    detail: Mapped[str] = mapped_column(String(1024), default="")
+
+
+class EmergencyStopRecord(Base):
+    """Singleton row (id=1) holding current emergency-stop state. A real
+    table (not a process-memory flag) so the engaged state survives a
+    backend restart -- an engaged stop must never silently clear itself
+    just because the process was restarted."""
+
+    __tablename__ = "emergency_stop_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    engaged: Mapped[bool] = mapped_column(Boolean, default=False)
+    reason: Mapped[str] = mapped_column(String(512), default="")
+    activated_by: Mapped[str] = mapped_column(String(128), default="")
+    updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
 
