@@ -71,6 +71,23 @@ def test_close_allowed_application(mock_process_iter):
     mock_proc.terminate.assert_called_once()
 
 @patch("psutil.process_iter")
+def test_close_application_with_pid(mock_process_iter):
+    """Test closing a specific PID of an allowed application."""
+    mock_proc1 = MagicMock()
+    mock_proc1.info = {"pid": 1000, "name": "notepad.exe"}
+    mock_proc2 = MagicMock()
+    mock_proc2.info = {"pid": 2000, "name": "notepad.exe"}
+    
+    mock_process_iter.return_value = [mock_proc1, mock_proc2]
+    
+    result = close_application("notepad", target_pid=2000)
+    
+    assert result["success"] is True
+    assert "PID 2000" in result["message"]
+    mock_proc1.terminate.assert_not_called()
+    mock_proc2.terminate.assert_called_once()
+
+@patch("psutil.process_iter")
 def test_close_blocked_application(mock_process_iter):
     """Test closing a blocked application is rejected."""
     result = close_application("explorer")
@@ -120,6 +137,12 @@ def test_take_screenshot(mock_grab, tmp_path):
     mock_img = MagicMock()
     mock_img.width = 1920
     mock_img.height = 1080
+    
+    def mock_save(filepath, fmt):
+        with open(filepath, "wb") as f:
+            f.write(b"dummy image data")
+            
+    mock_img.save.side_effect = mock_save
     mock_grab.return_value = mock_img
     
     with patch("tempfile.gettempdir", return_value=str(tmp_path)):
@@ -127,7 +150,12 @@ def test_take_screenshot(mock_grab, tmp_path):
         
     assert result["success"] is True
     assert result["width"] == 1920
-    assert "filepath" in result
+    assert "image_base64_secret" in result
+    
+    # Ensure the screenshots directory exists but the file was cleaned up
+    screenshots_dir = tmp_path / "ultron_screenshots"
+    assert screenshots_dir.exists()
+    assert len(list(screenshots_dir.glob("*.png"))) == 0
     mock_img.save.assert_called_once()
 
 # =====================================================================

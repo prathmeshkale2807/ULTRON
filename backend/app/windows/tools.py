@@ -29,32 +29,32 @@ async def handle_open_application(arguments: dict[str, Any]) -> dict[str, Any]:
 async def verify_open_application(arguments: dict[str, Any], result: dict[str, Any]) -> bool:
     if not result.get("success"):
         return False
-    app_name = arguments.get("app_name")
-    if not app_name:
+    
+    pid = result.get("pid")
+    if not pid:
         return False
         
-    from app.windows.safety import get_allowed_executable
-    executable = get_allowed_executable(app_name)
-    if not executable:
-        return False
-        
-    # Check if a process matching the executable is running
+    # Check if the specific process ID we just spawned is running
     import psutil
-    for proc in psutil.process_iter(['name']):
-        try:
-            if proc.info['name'] and proc.info['name'].lower() == executable.lower():
-                return True
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
-            pass
+    try:
+        proc = psutil.Process(pid)
+        if proc.is_running():
+            return True
+    except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+        pass
+        
     return False
 
 async def handle_close_application(arguments: dict[str, Any]) -> dict[str, Any]:
-    return close_application(arguments["app_name"])
+    app_name = arguments.get("app_name")
+    pid = arguments.get("pid")
+    return close_application(app_name, pid)
 
 async def verify_close_application(arguments: dict[str, Any], result: dict[str, Any]) -> bool:
     if not result.get("success"):
         return False
     app_name = arguments.get("app_name")
+    pid = arguments.get("pid")
     if not app_name:
          return False
          
@@ -64,6 +64,16 @@ async def verify_close_application(arguments: dict[str, Any], result: dict[str, 
         return False
         
     import psutil
+    if pid is not None:
+        try:
+            proc = psutil.Process(pid)
+            if proc.is_running() and proc.name().lower() == executable.lower():
+                return False # specific targeted instance is still running
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            pass
+        return True
+    
+    # If no pid provided, verify all instances are closed
     for proc in psutil.process_iter(['name']):
         try:
             if proc.info['name'] and proc.info['name'].lower() == executable.lower():
@@ -84,8 +94,7 @@ async def handle_take_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
 async def verify_take_screenshot(arguments: dict[str, Any], result: dict[str, Any]) -> bool:
     if not result.get("success"):
         return False
-    filepath = result.get("filepath")
-    if filepath and os.path.exists(filepath) and os.path.getsize(filepath) > 0:
+    if "image_base64_secret" in result and len(result["image_base64_secret"]) > 0:
         return True
     return False
 
@@ -122,18 +131,22 @@ tool_open_application = ToolDefinition(
 
 tool_close_application = ToolDefinition(
     name="windows_close_application",
-    description="Closes all instances of an allowed Windows application.",
+    description="Closes an allowed Windows application gracefully. Prefer providing a specific 'pid' to target a single instance. If only 'app_name' is provided, all running instances of the app will be closed.",
     input_schema={
         "type": "object",
         "properties": {
             "app_name": {
                 "type": "string",
-                "description": "The name of the application to close."
+                "description": "The name of the application."
+            },
+            "pid": {
+                "type": "integer",
+                "description": "Optional. The specific process ID to close. Highly recommended."
             }
         },
         "required": ["app_name"]
     },
-    output_schema={"type": "object"},
+    output_schema={"type": "object", "additionalProperties": True},
     risk_level=RiskLevel.HIGH,
     permission_category=PermissionCategory.PC_PROCESS_CONTROL,
     confirmation_tier=ConfirmationTier.ALWAYS_ASK,

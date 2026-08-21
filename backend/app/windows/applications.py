@@ -25,12 +25,14 @@ def open_application(app_name: str) -> dict[str, Any]:
         }
     except FileNotFoundError:
         return {"success": False, "error": f"Executable '{executable}' not found on PATH."}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except PermissionError:
+        return {"success": False, "error": "Access denied when attempting to launch application."}
+    except Exception:
+        return {"success": False, "error": "An unexpected error occurred while launching the application."}
 
 
-def close_application(app_name: str) -> dict[str, Any]:
-    """Closes all instances of an allowed application gracefully."""
+def close_application(app_name: str, target_pid: int | None = None) -> dict[str, Any]:
+    """Closes instances of an allowed application gracefully. Targets a specific PID if provided."""
     executable = get_allowed_executable(app_name)
     if not executable:
         return {"success": False, "error": f"Application '{app_name}' is not in the allowlist."}
@@ -41,16 +43,23 @@ def close_application(app_name: str) -> dict[str, Any]:
     for proc in psutil.process_iter(['pid', 'name']):
         try:
             if proc.info['name'] and proc.info['name'].lower() == executable.lower():
+                if target_pid is not None and proc.info['pid'] != target_pid:
+                    continue
                 proc.terminate() # Graceful termination
                 closed_count += 1
-        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess) as e:
-            errors.append(str(e))
+                if target_pid is not None:
+                    break # Stop if we found the exact pid
+        except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+            errors.append("Access denied or process already terminated.")
+        except Exception:
+            errors.append("Unexpected error terminating process.")
 
     if closed_count > 0:
-        return {"success": True, "message": f"Closed {closed_count} instances of {executable}."}
+        target_msg = f" (PID {target_pid})" if target_pid else " instances"
+        return {"success": True, "message": f"Closed {closed_count}{target_msg} of {executable}."}
     
     if errors:
-        return {"success": False, "error": f"Failed to close some instances: {errors}"}
+        return {"success": False, "error": "Failed to close application instances. Ensure permissions are sufficient."}
         
     return {"success": False, "error": f"No running instances of '{executable}' found to close."}
 

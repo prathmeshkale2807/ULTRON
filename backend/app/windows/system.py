@@ -30,8 +30,8 @@ def get_system_info() -> dict[str, Any]:
                 info["power_plugged"] = battery.power_plugged
 
         return info
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        return {"success": False, "error": "Failed to retrieve system information."}
 
 def get_active_window() -> dict[str, Any]:
     """Returns the title of the currently active (foreground) window."""
@@ -48,5 +48,5 @@ def get_active_window() -> dict[str, Any]:
         ctypes.windll.user32.GetWindowTextW(hwnd, buff, length + 1)
         
         return {"success": True, "title": buff.value}
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except Exception:
+        return {"success": False, "error": "Failed to retrieve active window title."}
