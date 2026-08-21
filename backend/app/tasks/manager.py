@@ -299,6 +299,21 @@ class TaskManager:
             row.started_at = now
         if new_state in TERMINAL_STATES:
             row.completed_at = now
+            
+        # Phase 8: Clean up browser context on explicit cancellation (task cancel, emergency stop)
+        if new_state == TaskState.CANCELLED:
+            if row.session_id:
+                try:
+                    import asyncio
+                    from app.browser.manager import get_browser_manager
+                    try:
+                        loop = asyncio.get_running_loop()
+                        loop.create_task(get_browser_manager().close_session(row.session_id))
+                    except RuntimeError:
+                        pass # No event loop in this thread, skip cleanup (for synchronous tests)
+                except Exception:
+                    pass
+
         if error_summary is not None:
             row.error_summary = redact_detail(error_summary)[:512]
 

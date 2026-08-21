@@ -49,6 +49,14 @@ async def lifespan(app: FastAPI):
     from app.tools.registry import get_registry
     register_windows_tools(get_registry())
 
+    # Register Email and Calendar Tools (Phase 10)
+    from app.tools.email import EMAIL_TOOLS
+    from app.tools.calendar import CALENDAR_TOOLS
+    for tool in EMAIL_TOOLS:
+        get_registry().register(tool, replace=True)
+    for tool in CALENDAR_TOOLS:
+        get_registry().register(tool, replace=True)
+
     # Start the task worker pool (Phase 5).
     from app.tasks.worker import get_task_worker
 

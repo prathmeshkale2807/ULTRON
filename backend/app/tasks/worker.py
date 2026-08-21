@@ -199,7 +199,14 @@ async def _execute_task(task_id: str, *, session_factory: SessionFactory) -> Non
             row = db.get(TaskRecord, task_id)
             tools_requested: list[str] = json.loads(row.tools_requested or "[]")
 
-            for tool_name in tools_requested:
+            for step in tools_requested:
+                if isinstance(step, str):
+                    tool_name = step
+                    arguments = {}
+                else:
+                    tool_name = step.get("tool_name")
+                    arguments = step.get("arguments", {})
+
                 if token.is_cancel_requested():
                     manager.transition_state(task_id, TaskState.CANCELLED, actor="worker")
                     return
@@ -226,7 +233,31 @@ async def _execute_task(task_id: str, *, session_factory: SessionFactory) -> Non
                     detail=f"tool={tool_name}",
                     actor="worker",
                 )
-                logger.info("Task step: task_id=%s tool=%s", task_id, tool_name)
+                logger.info("Task step executing: task_id=%s tool=%s args=%s", task_id, tool_name, arguments)
+
+                from app.executor.executor import ToolExecutor
+                from app.tools.registry import get_registry
+                executor = ToolExecutor(db=db, registry=get_registry())
+                
+                from app.tools.models import DeviceType
+                target_device_str = step.get("target_device") if isinstance(step, dict) else None
+                device = DeviceType(target_device_str) if target_device_str else DeviceType.PC
+                
+                result = await executor.execute(
+                    tool_name=tool_name,
+                    arguments=arguments,
+                    target_device=device,
+                    session_id=row.session_id,
+                )
+                
+                if not result.success:
+                    manager.transition_state(
+                        task_id, 
+                        TaskState.FAILED, 
+                        error_summary=f"Step {tool_name} failed: {result.error_message}",
+                        actor="worker"
+                    )
+                    return
 
             # All steps done → VERIFYING → COMPLETED.
             manager.transition_state(task_id, TaskState.VERIFYING, actor="worker")

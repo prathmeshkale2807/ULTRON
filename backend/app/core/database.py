@@ -19,7 +19,7 @@ from collections.abc import Generator
 from datetime import datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import Boolean, DateTime, Integer, String, create_engine
+from sqlalchemy import Boolean, DateTime, Integer, String, Float, create_engine
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from app.core.config import get_settings
@@ -236,6 +236,58 @@ class TaskAuditEntry(Base):
     detail: Mapped[str] = mapped_column(String(512), default="")
     actor: Mapped[str] = mapped_column(String(128), default="system")
 
+
+
+class ConversationRecord(Base):
+    """A multi-turn conversation session."""
+    __tablename__ = "conversation_records"
+
+    conversation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    state: Mapped[str] = mapped_column(String(32), default="idle")
+    active_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    active_plan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    pending_confirmation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class MessageRecord(Base):
+    """A single turn in a conversation."""
+    __tablename__ = "message_records"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    conversation_id: Mapped[str] = mapped_column(String(64), index=True)
+    role: Mapped[str] = mapped_column(String(16))  # user, assistant, system, tool
+    content: Mapped[str] = mapped_column(String(4096), default="")
+    metadata_json: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class MemoryRecord(Base):
+    """Long-term personal user memory."""
+    __tablename__ = "long_term_memories"
+
+    memory_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)  # Authenticated user/owner
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)  # Provenance/Session scope
+    
+    memory_type: Mapped[str] = mapped_column(String(32))
+    content: Mapped[str] = mapped_column(String(4096))
+    normalized_content: Mapped[str | None] = mapped_column(String(4096), nullable=True)
+    
+    importance: Mapped[float] = mapped_column(Float, default=1.0)
+    confidence: Mapped[float] = mapped_column(Float, default=1.0)
+    
+    sensitivity: Mapped[str] = mapped_column(String(32), default="INTERNAL")
+    source_type: Mapped[str] = mapped_column(String(32), default="USER_DIRECT")
+    status: Mapped[str] = mapped_column(String(32), default="ACTIVE")
+    version: Mapped[int] = mapped_column(Integer, default=1)
+    
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_accessed_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 def schema_is_current() -> bool:

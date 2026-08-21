@@ -61,13 +61,13 @@ def test_session_grant_does_not_persist_across_stores(db_session) -> None:
 
 def test_session_grant_takes_priority_over_stale_persistent_denial(db_session) -> None:
     store = PermissionStore(db_session, session_store={})
-    store.revoke(PermissionCategory.BROWSER, PermissionScope.PERSISTENT)
+    store.revoke(PermissionCategory.BROWSER_NAVIGATE, PermissionScope.PERSISTENT)
     store.grant(
-        PermissionCategory.BROWSER, PermissionScope.SESSION, session_id="s1"
+        PermissionCategory.BROWSER_NAVIGATE, PermissionScope.SESSION, session_id="s1"
     )
 
     assert (
-        store.check(PermissionCategory.BROWSER, session_id="s1") == PermissionStatus.GRANTED
+        store.check(PermissionCategory.BROWSER_NAVIGATE, session_id="s1") == PermissionStatus.GRANTED
     )
 
 

@@ -350,7 +350,7 @@ class ToolExecutor:
             confirmation_result = "not_required"
 
         # --- Stage 6: execution --------------------------------------------
-        output, exec_error = await self._run_with_retries(tool, arguments)
+        output, exec_error = await self._run_with_retries(tool, arguments, session_id)
         if exec_error is not None:
             execution_result = (
                 "timed_out" if isinstance(exec_error, asyncio.TimeoutError) else "error"
@@ -438,10 +438,15 @@ class ToolExecutor:
         return resolved.status == ConfirmationStatus.APPROVED
 
     async def _run_with_retries(
-        self, tool: ToolDefinition, arguments: dict[str, Any]
+        self, tool: ToolDefinition, arguments: dict[str, Any], session_id: str | None
     ) -> tuple[dict[str, Any] | None, Exception | None]:
         policy = tool.retry_policy
         last_error: Exception | None = None
+
+        # Inject session_id for tools that need auth
+        if session_id:
+            arguments["_session_id"] = session_id
+
         for attempt in range(1, policy.max_attempts + 1):
             try:
                 output = await asyncio.wait_for(

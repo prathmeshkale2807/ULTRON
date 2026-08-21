@@ -51,7 +51,22 @@ class PermissionCategory(str, Enum):
     FILE_WRITE = "file_write"
     SYSTEM_CONTROL = "system_control"
     NETWORK = "network"
-    BROWSER = "browser"
+    BROWSER_READ = "browser_read"
+    BROWSER_NAVIGATE = "browser_navigate"
+    
+    # Phase 10: Email and Calendar
+    EMAIL_READ = "email_read"
+    EMAIL_DRAFT = "email_draft"
+    EMAIL_MODIFY = "email_modify"
+    EMAIL_SEND = "email_send"
+    
+    CALENDAR_READ = "calendar_read"
+    CALENDAR_CREATE = "calendar_create"
+    CALENDAR_MODIFY = "calendar_modify"
+    CALENDAR_CANCEL = "calendar_cancel"
+    BROWSER_INTERACT = "browser_interact"
+    BROWSER_SENSITIVE_INPUT = "browser_sensitive_input"
+    BROWSER_SCREENSHOT = "browser_screenshot"
     COMMUNICATION = "communication"  # email, calendar, messaging
     DEVICE_CONTROL = "device_control"  # PC/Android input, power, etc.
     FINANCIAL = "financial"

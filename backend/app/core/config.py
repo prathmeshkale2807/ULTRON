@@ -39,6 +39,10 @@ class Settings(BaseSettings):
     environment: str = Field(default="development")  # development | production
     debug: bool = Field(default=True)
 
+    # --- Phase 10: Google OAuth -------------------------------------------
+    google_client_id: str = Field(default="mock-client-id")
+    google_client_secret: str = Field(default="mock-client-secret")
+
     # --- Networking ---------------------------------------------------------
     # Bound to localhost only in Phase 1. Remote Mode (section 34 of the
     # spec) is explicitly out of scope until its own security review.
@@ -79,6 +83,11 @@ class Settings(BaseSettings):
     # deliberate opt-in per provider, not an assumed default.
     ai_claude_authorized_sensitivities: str = Field(default="PUBLIC,INTERNAL,SENSITIVE,PRIVATE")
     ai_gemini_authorized_sensitivities: str = Field(default="PUBLIC,INTERNAL")
+
+    # --- Browser (Phase 8) --------------------------------------------------
+    # Explicitly controls whether the browser can access localhost or internal
+    # IP blocks like 192.168.x.x, 10.x.x.x, etc.
+    allow_local_network_browser: bool = Field(default=False)
 
     @property
     def data_dir(self) -> Path:
