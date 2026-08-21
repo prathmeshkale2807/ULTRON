@@ -12,6 +12,7 @@ is a real incident.
 from __future__ import annotations
 
 from typing import Any
+import re
 
 from app.core.database import AuditLogEntry
 from app.core.logging_config import get_logger
@@ -37,6 +38,17 @@ _SECRET_KEY_MARKERS = (
 )
 
 _MAX_DETAIL_LENGTH = 1024
+
+# Defense-in-depth patterns for common bearer/API-key-like values that may
+# arrive inside free-form strings (e.g. exception messages). This is not a
+# claim of perfect secret detection; callers should still avoid logging raw
+# payloads.
+_SECRET_VALUE_PATTERNS = (
+    re.compile(r"(?i)(bearer\s+)[A-Za-z0-9._-]+"),
+    re.compile(r"(?i)(api[_-]?key\s*[:=]\s*)[^\s,;]+"),
+    re.compile(r"(?i)(password\s*[:=]\s*)[^\s,;]+"),
+    re.compile(r"(?i)(token\s*[:=]\s*)[^\s,;]+"),
+)
 
 
 def _is_secret_key(key: str) -> bool:
@@ -65,6 +77,11 @@ def _redact_value(value: Any) -> Any:
         }
     if isinstance(value, (list, tuple)):
         return [_redact_value(v) for v in value]
+    if isinstance(value, str):
+        text = value
+        for pattern in _SECRET_VALUE_PATTERNS:
+            text = pattern.sub(lambda m: f"{m.group(1)}[REDACTED]", text)
+        return text
     return value
 
 

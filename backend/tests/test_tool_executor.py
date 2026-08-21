@@ -17,6 +17,7 @@ import pytest
 from pydantic import ValidationError
 from sqlalchemy import select
 
+from app.audit.log import redact_detail
 from app.core.database import AuditLogEntry
 from app.emergency.stop import EmergencyStop
 from app.executor.confirmation import ConfirmationBroker
@@ -28,6 +29,7 @@ from app.executor.executor import (
     PermissionDeniedError,
     RiskRejectedError,
     SchemaValidationError,
+    OutputSchemaValidationError,
     ToolDisabledError,
     ToolExecutor,
     ToolNotFoundError,
@@ -530,6 +532,48 @@ async def test_verification_callback_marks_verified_or_failed(db_session) -> Non
     assert result.success is True
     assert latest_audit_row(db_session).verification_result == "verified"
 
+
+
+
+async def test_invalid_output_schema_is_rejected(db_session) -> None:
+    registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
+    registry.register(make_tool(output_schema={"type": "object", "required": ["must_exist"]}))
+    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+
+    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+
+    assert result.success is False
+    assert result.stage == "output_validation"
+    assert latest_audit_row(db_session).execution_result == "rejected_invalid_output"
+
+
+async def test_failed_verification_is_not_reported_as_success(db_session) -> None:
+    registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
+
+    async def always_false_verifier(args, output):
+        return False
+
+    registry.register(
+        make_tool(
+            verification_method=VerificationMethod.CALLBACK,
+            verifier=always_false_verifier,
+        )
+    )
+    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+
+    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+
+    assert result.success is False
+    assert result.output is None
+    row = latest_audit_row(db_session)
+    assert row.execution_result == "success_unverified"
+    assert row.verification_result == "failed"
+
+
+def test_audit_redacts_secret_like_strings() -> None:
+    text = redact_detail("Authorization: Bearer super-secret-token")
+    assert "super-secret-token" not in text
+    assert "[REDACTED]" in text
 
 # --- Emergency Stop ----------------------------------------------------------
 

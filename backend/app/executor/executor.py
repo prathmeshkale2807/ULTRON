@@ -59,6 +59,10 @@ class SchemaValidationError(ToolExecutionError):
     pass
 
 
+class OutputSchemaValidationError(ToolExecutionError):
+    pass
+
+
 class RiskRejectedError(ToolExecutionError):
     pass
 
@@ -221,11 +225,11 @@ class ToolExecutor:
             jsonschema.validate(instance=arguments, schema=tool.input_schema)
         except jsonschema.exceptions.SchemaError as exc:
             execution_result = "rejected_invalid_tool_schema"
-            _audit(f"tool '{tool_name}' has an invalid input_schema: {exc.message}")
+            _audit(f"tool '{tool_name}' has an invalid input_schema ({type(exc).__name__})")
             raise SchemaValidationError(f"tool '{tool_name}' has an invalid schema") from exc
         except jsonschema.exceptions.ValidationError as exc:
             execution_result = "rejected_malformed_arguments"
-            _audit(f"argument validation failed: {exc.message}")
+            _audit(f"argument validation failed ({type(exc).__name__})")
             raise SchemaValidationError(f"argument validation failed: {exc.message}") from exc
 
         # --- Stage 2: risk validation -----------------------------------
@@ -351,7 +355,7 @@ class ToolExecutor:
             execution_result = (
                 "timed_out" if isinstance(exec_error, asyncio.TimeoutError) else "error"
             )
-            _audit(f"execution failed: {exec_error}")
+            _audit(f"execution failed ({type(exec_error).__name__})")
             if isinstance(exec_error, asyncio.TimeoutError):
                 raise ToolTimeoutError(
                     f"tool '{tool_name}' exceeded its {tool.timeout_seconds}s timeout"
@@ -365,8 +369,38 @@ class ToolExecutor:
 
         execution_result = "success"
 
-        # --- Stage 7: verification -------------------------------------------
+        # --- Stage 7a: output-schema validation -----------------------------
+        # A handler returning malformed data is not a successful tool call.
+        # Validate the declared output contract before verification.
+        try:
+            jsonschema.validate(instance=output, schema=tool.output_schema)
+        except jsonschema.exceptions.SchemaError as exc:
+            execution_result = "rejected_invalid_output_schema"
+            verification_result = "not_reached"
+            _audit(f"tool '{tool_name}' has an invalid output_schema ({type(exc).__name__})")
+            raise OutputSchemaValidationError(
+                f"tool '{tool_name}' has an invalid output schema"
+            ) from exc
+        except jsonschema.exceptions.ValidationError as exc:
+            execution_result = "rejected_invalid_output"
+            verification_result = "not_reached"
+            _audit(f"tool '{tool_name}' returned output that violates its schema ({type(exc).__name__})")
+            return ToolExecutionResult(
+                success=False,
+                stage="output_validation",
+                error="tool output failed the declared output schema",
+                confirmation_id=confirmation_id,
+            )
+
+        # --- Stage 7b: verification -----------------------------------------
         verification_result = await self._verify(tool, arguments, output or {})
+
+        # Only verified / explicitly-not-required results may be reported as
+        # successful. A failed callback or pending manual verification is not
+        # a completed action.
+        verified_success = verification_result in {"verified", "not_required"}
+        if not verified_success:
+            execution_result = "success_unverified"
 
         audit_entry = self.audit_logger.record(
             requested_action=action_label,
@@ -380,9 +414,10 @@ class ToolExecutor:
         )
 
         return ToolExecutionResult(
-            success=True,
+            success=verified_success,
             stage="verification",
-            output=output,
+            output=output if verified_success else None,
+            error=None if verified_success else "tool execution completed but verification did not establish success",
             audit_id=audit_entry.id,
             confirmation_id=confirmation_id,
         )
