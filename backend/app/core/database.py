@@ -123,6 +123,65 @@ class EmergencyStopRecord(Base):
     )
 
 
+class ActiveProfileRecord(Base):
+    """Singleton row (id=1) holding the persisted active Safety Mode
+    profile (Safe/Balanced/Trusted/Custom) and, for Custom, the
+    per-category confirmation-tier override map as a JSON string.
+    A real table (not process memory) so the active profile survives a
+    backend restart -- restarting must never silently reset the user
+    back to Balanced without them choosing that."""
+
+    __tablename__ = "active_profile_state"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    mode: Mapped[str] = mapped_column(String(16), default="balanced")
+    custom_overrides: Mapped[str] = mapped_column(String(2048), default="{}")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    updated_by: Mapped[str] = mapped_column(String(128), default="")
+
+
+class SessionRecord(Base):
+    """A ULTRON session's lifecycle metadata. Session-scoped permission
+    grants themselves stay in PermissionStore's in-memory table (see
+    app/permissions/store.py) -- this row is only the session's
+    identity/expiry/invalidation state, which the session-scoped
+    permission checks are gated against at the API layer."""
+
+    __tablename__ = "sessions"
+
+    session_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    invalidated: Mapped[bool] = mapped_column(Boolean, default=False)
+    invalidated_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class PermissionAuditEntry(Base):
+    """Append-only history of permission/profile/emergency-reset
+    *management* decisions -- distinct from AuditLogEntry, which
+    records tool-call decisions. Never holds API keys, passwords,
+    tokens, or other secrets: only short state labels and identifiers
+    are ever written here (see app/audit/permission_log.py)."""
+
+    __tablename__ = "permission_audit_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    actor: Mapped[str] = mapped_column(String(128), default="unknown")
+    action: Mapped[str] = mapped_column(String(32), index=True)
+    category: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    tool_name: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    device: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    old_state: Mapped[str] = mapped_column(String(64), default="")
+    new_state: Mapped[str] = mapped_column(String(64), default="")
+
+
 def schema_is_current() -> bool:
     """True if the DB is migrated to the latest Alembic revision.
 
