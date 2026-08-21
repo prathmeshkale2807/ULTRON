@@ -182,6 +182,62 @@ class PermissionAuditEntry(Base):
     new_state: Mapped[str] = mapped_column(String(64), default="")
 
 
+class TaskRecord(Base):
+    """One row per submitted task.
+
+    A task is a unit of work submitted to the Task Manager. It has a
+    full lifecycle (QUEUED → ... → COMPLETED/FAILED/CANCELLED) and is
+    owned by the session that created it. Every state change that matters
+    for safety or audit also writes a TaskAuditEntry.
+
+    Never stores secrets -- description and error_summary are redacted
+    before write. tools_requested and progress_metadata are JSON blobs
+    of safe identifiers only.
+    """
+
+    __tablename__ = "task_records"
+
+    task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    description: Mapped[str] = mapped_column(String(2000), default="")
+    priority: Mapped[str] = mapped_column(String(16), default="normal")
+    state: Mapped[str] = mapped_column(String(32), default="queued", index=True)
+    error_summary: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cancellation_requested_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    tools_requested: Mapped[str] = mapped_column(String(1024), default="[]")
+    verification_status: Mapped[str] = mapped_column(String(32), default="not_required")
+    progress_metadata: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+
+
+class TaskAuditEntry(Base):
+    """Append-only log of task lifecycle events.
+
+    Distinct from AuditLogEntry (which records individual tool-call
+    pipeline decisions) and PermissionAuditEntry (which records
+    permission management changes). This table records task-level events:
+    created, state changes, cancellation, emergency-stop influence, etc.
+
+    Never holds secrets -- `detail` is bounded and redacted before write.
+    """
+
+    __tablename__ = "task_audit_entries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc)
+    )
+    task_id: Mapped[str] = mapped_column(String(64), index=True)
+    event: Mapped[str] = mapped_column(String(64))
+    detail: Mapped[str] = mapped_column(String(512), default="")
+    actor: Mapped[str] = mapped_column(String(128), default="system")
+
+
+
 def schema_is_current() -> bool:
     """True if the DB is migrated to the latest Alembic revision.
 

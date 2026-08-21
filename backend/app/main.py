@@ -43,7 +43,20 @@ async def lifespan(app: FastAPI):
         )
     else:
         logger.info("Database schema up to date at %s", settings.database_url)
+
+    # Start the task worker pool (Phase 5).
+    from app.tasks.worker import get_task_worker
+
+    worker = get_task_worker()
+    await worker.start()
+    logger.info("Task worker pool started")
+
     yield
+
+    # Graceful shutdown: stop accepting new tasks and drain.
+    await worker.stop()
+    from app.tasks.worker import reset_task_worker
+    reset_task_worker()
     logger.info("ULTRON Core Service shutting down")
 
 

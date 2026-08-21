@@ -1,4 +1,4 @@
-"""
+﻿"""
 Permission State API surface.
 
 Thin wrapper over PermissionStore -- grant / revoke / check, for both
@@ -11,8 +11,14 @@ they require the local auth token (see app/security/local_auth.py) and
 are recorded to the permission audit trail (see
 app/audit/permission_log.py). A session-scoped request against an
 unknown/expired/invalidated session is rejected rather than silently
-falling back to persistent-only behavior, so callers can't accidentally
+falling back to persistent-only behavior, so callers cannot accidentally
 rely on a dead session.
+
+Audit identity (Phase 4 security correction):
+  The audit actor is ALWAYS derived from the authenticated Principal
+  returned by require_local_auth() -- never from any client-supplied
+  body field. The request model contains no actor field; callers
+  cannot supply or spoof an audit identity.
 """
 
 from __future__ import annotations
@@ -25,7 +31,7 @@ from app.audit.permission_log import PermissionAuditLogger
 from app.core.database import get_db
 from app.permissions.models import PermissionScope, PermissionStatus
 from app.permissions.store import PermissionStore
-from app.security.local_auth import require_local_auth
+from app.security.local_auth import Principal, require_local_auth
 from app.sessions.manager import SessionManager
 from app.tools.models import DeviceType, PermissionCategory
 
@@ -33,12 +39,17 @@ router = APIRouter(prefix="/permissions")
 
 
 class PermissionRequest(BaseModel):
+    """Body for grant/revoke.
+
+    No actor / identity field: audit identity is always derived from the
+    authenticated Principal, not from the request body.
+    """
+
     category: PermissionCategory
     scope: PermissionScope
     session_id: str | None = None
     tool_name: str | None = None
     device: DeviceType | None = None
-    actor: str = "unknown"
 
 
 class PermissionCheckResponse(BaseModel):
@@ -70,7 +81,7 @@ def check_permission(
 def grant_permission(
     body: PermissionRequest,
     db: Session = Depends(get_db),
-    _auth: str = Depends(require_local_auth),
+    principal: Principal = Depends(require_local_auth),
 ) -> dict:
     _require_valid_session_if_scoped(body, db)
     store = PermissionStore(db)
@@ -85,7 +96,7 @@ def grant_permission(
         device=body.device,
     )
     PermissionAuditLogger(db).record(
-        actor=body.actor,
+        actor=principal.identity,  # authenticated identity -- never from body
         action="grant",
         category=body.category.value,
         tool_name=body.tool_name,
@@ -100,7 +111,7 @@ def grant_permission(
 def revoke_permission(
     body: PermissionRequest,
     db: Session = Depends(get_db),
-    _auth: str = Depends(require_local_auth),
+    principal: Principal = Depends(require_local_auth),
 ) -> dict:
     _require_valid_session_if_scoped(body, db)
     store = PermissionStore(db)
@@ -115,7 +126,7 @@ def revoke_permission(
         device=body.device,
     )
     PermissionAuditLogger(db).record(
-        actor=body.actor,
+        actor=principal.identity,  # authenticated identity -- never from body
         action="revoke",
         category=body.category.value,
         tool_name=body.tool_name,

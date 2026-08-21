@@ -8,6 +8,13 @@ Creation/lookup are unauthenticated (a session is how a caller
 a sensitive operation in itself); invalidation is likewise left open
 since a caller invalidating its own session is self-limiting, not
 privilege-escalating.
+
+TTL clamping (Issue 2 fix):
+  Any caller-supplied ttl_seconds is silently clamped to
+  [0, DEFAULT_SESSION_TTL_SECONDS]. Omitting ttl_seconds uses the same
+  default cap. This prevents unauthenticated callers from creating
+  never-expiring sessions (DB exhaustion / permission-persistence DoS)
+  while still allowing the normal 12-hour lifespan the Tauri UI needs.
 """
 
 from __future__ import annotations
@@ -16,17 +23,28 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
-from app.sessions.manager import SessionInfo, SessionManager
+from app.sessions.manager import DEFAULT_SESSION_TTL_SECONDS, SessionInfo, SessionManager
 
 router = APIRouter(prefix="/sessions")
+
+
+def _clamp_ttl(ttl_seconds: float | None) -> float:
+    """Return a ttl_seconds value that is safe to pass to SessionManager.
+
+    None (omitted) and any value above the cap both collapse to
+    DEFAULT_SESSION_TTL_SECONDS. Values <= 0 are left as-is so tests
+    can still create immediately-expired sessions (they're harmless --
+    an expired session is already treated as invalid everywhere)."""
+    if ttl_seconds is None or ttl_seconds > DEFAULT_SESSION_TTL_SECONDS:
+        return DEFAULT_SESSION_TTL_SECONDS
+    return ttl_seconds
 
 
 @router.post("", response_model=SessionInfo)
 def create_session(
     ttl_seconds: float | None = None, db: Session = Depends(get_db)
 ) -> SessionInfo:
-    kwargs = {} if ttl_seconds is None else {"ttl_seconds": ttl_seconds}
-    return SessionManager(db).create(**kwargs)
+    return SessionManager(db).create(ttl_seconds=_clamp_ttl(ttl_seconds))
 
 
 @router.get("/{session_id}", response_model=SessionInfo)

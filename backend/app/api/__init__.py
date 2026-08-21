@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api import confirmations, emergency, health, permissions, profile, sessions, tools
+from app.api import confirmations, emergency, health, permissions, profile, sessions, tasks, tools
 
 api_router = APIRouter()
 api_router.include_router(health.router, tags=["system"])
@@ -10,3 +10,4 @@ api_router.include_router(confirmations.router, tags=["confirmations"])
 api_router.include_router(emergency.router, tags=["emergency"])
 api_router.include_router(profile.router, tags=["profile"])
 api_router.include_router(sessions.router, tags=["sessions"])
+api_router.include_router(tasks.router, tags=["tasks"])

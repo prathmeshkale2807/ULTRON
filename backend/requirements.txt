@@ -14,8 +14,11 @@ jsonschema==4.23.0
 anthropic==0.39.0
 google-genai==0.3.0
 
+# Secret storage (Phase 4): Windows Credential Manager via keyring.
+# On Windows, keyring uses the WinVault backend (DPAPI-encrypted).
+keyring==25.6.0
+
 # Testing
 pytest==8.3.3
 pytest-asyncio==0.24.0
 httpx==0.27.2
-
