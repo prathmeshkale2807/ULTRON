@@ -79,6 +79,7 @@ class PermissionCategory(str, Enum):
     ANDROID_LOCATION_READ = "android_location_read"
     ANDROID_SMS_SEND = "android_sms_send"
     ANDROID_DEVICE_CONTROL = "android_device_control"
+    ANDROID_NOTIFICATION_READ = "android_notification_read"
     
     OTHER = "other"
 

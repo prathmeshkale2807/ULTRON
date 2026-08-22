@@ -32,7 +32,7 @@ async def test_android_get_location(mock_transport, mock_ctx):
     mock_transport.dispatch.return_value = {"lat": 1.0, "lon": 2.0}
     res = await handle_android_get_location(mock_ctx, {"target_device_id": "dev-1"})
     assert res == {"lat": 1.0, "lon": 2.0}
-    mock_transport.dispatch.assert_called_once_with("dev-1", "android_get_location", {})
+    mock_transport.dispatch.assert_called_once_with(mock_ctx, "dev-1", "android_get_location", {})
 
 @pytest.mark.asyncio
 async def test_android_send_sms(mock_transport, mock_ctx):
@@ -43,7 +43,7 @@ async def test_android_send_sms(mock_transport, mock_ctx):
         "message": "test msg"
     })
     assert res == {"success": True}
-    mock_transport.dispatch.assert_called_once_with("dev-1", "android_send_sms", {
+    mock_transport.dispatch.assert_called_once_with(mock_ctx, "dev-1", "android_send_sms", {
         "recipient": "123",
         "message": "test msg"
     })
@@ -56,7 +56,7 @@ async def test_android_open_app_allowed(mock_transport, mock_ctx):
         "package_name": "com.android.settings"
     })
     assert res == {"success": True}
-    mock_transport.dispatch.assert_called_once_with("dev-1", "android_open_app", {"package_name": "com.android.settings"})
+    mock_transport.dispatch.assert_called_once_with(mock_ctx, "dev-1", "android_open_app", {"package_name": "com.android.settings"})
 
 @pytest.mark.asyncio
 async def test_android_open_app_rejected(mock_transport, mock_ctx):

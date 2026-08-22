@@ -1,11 +1,15 @@
 import pytest
 import asyncio
+import json
 from fastapi.testclient import TestClient
 from fastapi.websockets import WebSocketDisconnect
 from unittest.mock import AsyncMock, MagicMock
 from app.android.transport import WebSocketAndroidTransport, DeviceOfflineError, DeviceTimeoutError
 from app.core.database import DeviceRecord
 from app.devices.manager import DeviceAuthError
+from app.tools.models import ExecutionContext
+
+dummy_ctx = ExecutionContext(principal_id="principal-1", session_id="session-1", task_id="task-1")
 
 @pytest.fixture
 def transport():
@@ -32,14 +36,14 @@ async def test_connect_and_disconnect(transport, mock_ws):
 @pytest.mark.asyncio
 async def test_dispatch_fails_if_offline(transport):
     with pytest.raises(DeviceOfflineError):
-        await transport.dispatch("dev-1", "action_test", {})
+        await transport.dispatch(dummy_ctx, "dev-1", "action_test", {})
 
 @pytest.mark.asyncio
 async def test_dispatch_success(transport, mock_ws):
     await transport.connect("dev-1", mock_ws)
     
     # Run dispatch in a task
-    dispatch_task = asyncio.create_task(transport.dispatch("dev-1", "action_test", {"foo": "bar"}))
+    dispatch_task = asyncio.create_task(transport.dispatch(dummy_ctx, "dev-1", "action_test", {"foo": "bar"}))
     
     # Wait for the future to be registered
     await asyncio.sleep(0.01)
@@ -64,7 +68,7 @@ async def test_dispatch_success(transport, mock_ws):
 async def test_dispatch_timeout(transport, mock_ws):
     await transport.connect("dev-1", mock_ws)
     with pytest.raises(DeviceTimeoutError):
-        await transport.dispatch("dev-1", "action_test", {}, timeout=0.01)
+        await transport.dispatch(dummy_ctx, "dev-1", "action_test", {}, timeout=0.01)
     
     assert len(transport.pending_requests) == 0
 
@@ -72,7 +76,7 @@ async def test_dispatch_timeout(transport, mock_ws):
 async def test_handle_response_wrong_device(transport, mock_ws):
     await transport.connect("dev-1", mock_ws)
     
-    dispatch_task = asyncio.create_task(transport.dispatch("dev-1", "action_test", {}))
+    dispatch_task = asyncio.create_task(transport.dispatch(dummy_ctx, "dev-1", "action_test", {}))
     await asyncio.sleep(0.01)
     req_id = list(transport.pending_requests.keys())[0]
     
@@ -91,7 +95,7 @@ async def test_handle_response_wrong_device(transport, mock_ws):
 async def test_disconnect_cancels_pending_requests(transport, mock_ws):
     await transport.connect("dev-1", mock_ws)
     
-    dispatch_task = asyncio.create_task(transport.dispatch("dev-1", "action_test", {}))
+    dispatch_task = asyncio.create_task(transport.dispatch(dummy_ctx, "dev-1", "action_test", {}))
     await asyncio.sleep(0.01)
     
     transport.disconnect("dev-1")
@@ -105,7 +109,7 @@ async def test_disconnect_cancels_pending_requests(transport, mock_ws):
 async def test_dispatch_cancellation(transport, mock_ws):
     await transport.connect("dev-1", mock_ws)
     
-    dispatch_task = asyncio.create_task(transport.dispatch("dev-1", "action_test", {}))
+    dispatch_task = asyncio.create_task(transport.dispatch(dummy_ctx, "dev-1", "action_test", {}))
     await asyncio.sleep(0.01)
     
     # Cancel the task
@@ -121,6 +125,5 @@ async def test_dispatch_cancellation(transport, mock_ws):
     # We should have two calls to send_text: the initial dispatch, and the cancel
     assert mock_ws.send_text.call_count == 2
     last_call = mock_ws.send_text.call_args[0][0]
-    import json
     data = json.loads(last_call)
     assert data["action"] == "cancel_task"

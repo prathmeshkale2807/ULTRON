@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     # IP blocks like 192.168.x.x, 10.x.x.x, etc.
     allow_local_network_browser: bool = Field(default=False)
 
+    # --- Voice (Phase 14) ---------------------------------------------------
+    voice_conversation_timeout_seconds: float = Field(default=15.0, gt=0.0)
+
     @property
     def data_dir(self) -> Path:
         return Path(self.log_dir).parent

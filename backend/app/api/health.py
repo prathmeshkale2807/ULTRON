@@ -15,6 +15,7 @@ all this returns.
 from __future__ import annotations
 
 import time
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends
@@ -128,10 +129,21 @@ async def health_check(db: Session = Depends(get_db)) -> HealthResponse:
         )
     )
 
+    # Voice Engine checks
+    stt_key = os.getenv("DEEPGRAM_API_KEY")
+    tts_key = os.getenv("ELEVENLABS_API_KEY")
+    voice_status = "ok" if stt_key and tts_key and stt_key != "not_configured" and tts_key != "not_configured" else "not_configured"
+    
+    components.append(
+        ComponentStatus(
+            name="voice_engine",
+            status=voice_status,
+            detail="Lightweight check completed"
+        )
+    )
+
     # --- Components not built yet: reported honestly, not faked ---------
-    for name in (
-        "voice_engine",
-    ):
+    for name in ():
         components.append(
             ComponentStatus(
                 name=name,

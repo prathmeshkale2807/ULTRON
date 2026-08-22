@@ -69,6 +69,7 @@ def list_devices(
 async def device_websocket(websocket: WebSocket, device_id: str, credential: str, db: Session = Depends(get_db)):
     manager = DeviceManager(db)
     try:
+        print(f"WS device_id={device_id} cred={credential}")
         principal_id = manager.heartbeat(device_id, credential)
     except DeviceAuthError:
         await websocket.close(code=4001, reason="Unauthorized")

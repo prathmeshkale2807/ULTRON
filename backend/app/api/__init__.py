@@ -15,3 +15,6 @@ api_router.include_router(conversations.router, tags=["conversations"])
 api_router.include_router(devices.router, tags=["devices"])
 from app.api import memory
 api_router.include_router(memory.router, tags=["memory"])
+
+from app.api import voice
+api_router.include_router(voice.router, tags=['voice'])

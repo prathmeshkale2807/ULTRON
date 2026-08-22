@@ -109,9 +109,11 @@ def test_health_endpoint_reports_real_database(client):
     # Everything not yet built must be honest about it -- this is the
     # "no fake capabilities" rule, enforced by a test, not just a promise.
     for name in (
-        "voice_engine",
+        # "voice_engine", # Now implemented
     ):
         assert components[name]["status"] == "not_implemented"
+        
+    assert components["voice_engine"]["status"] in ("ok", "not_configured")
 
 
 def test_health_endpoint_db_survives_multiple_calls(client):

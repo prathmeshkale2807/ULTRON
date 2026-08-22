@@ -45,19 +45,27 @@ class WebSocketAndroidTransport:
             if fut and not fut.done():
                 fut.set_exception(DeviceOfflineError("DEVICE_OFFLINE"))
 
-    async def dispatch(self, device_id: str, action: str, payload: dict, timeout: float = 30.0) -> dict:
+    async def dispatch(self, ctx: Any, device_id: str, action: str, payload: dict, timeout: float = 30.0) -> dict:
         if device_id not in self.connections:
             raise DeviceOfflineError("DEVICE_OFFLINE")
             
         ws = self.connections[device_id]
+        # We use our own request_id for transport correlation
         request_id = f"req-{uuid.uuid4()}"
         
         fut = asyncio.get_running_loop().create_future()
         setattr(fut, 'device_id', device_id)
+        # Store context attributes for correlation/audit
+        setattr(fut, 'task_id', getattr(ctx, 'task_id', None))
+        setattr(fut, 'principal_id', getattr(ctx, 'principal_id', None))
+        
         self.pending_requests[request_id] = fut
         
         msg = {
             "request_id": request_id,
+            "task_id": getattr(ctx, 'task_id', None),
+            "principal_id": getattr(ctx, 'principal_id', None),
+            "device_id": device_id,
             "action": action,
             "payload": payload
         }
