@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException
+import json
+from fastapi import APIRouter, Depends, HTTPException, WebSocket, WebSocketDisconnect
+from app.android.transport import get_transport
 from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.security.local_auth import Principal, require_local_auth
@@ -62,3 +64,27 @@ def list_devices(
             created_at=d.created_at
         ) for d in devices
     ]
+
+@router.websocket("/ws")
+async def device_websocket(websocket: WebSocket, device_id: str, credential: str, db: Session = Depends(get_db)):
+    manager = DeviceManager(db)
+    try:
+        principal_id = manager.heartbeat(device_id, credential)
+    except DeviceAuthError:
+        await websocket.close(code=4001, reason="Unauthorized")
+        return
+        
+    await websocket.accept()
+    transport = get_transport()
+    await transport.connect(device_id, websocket)
+    
+    try:
+        while True:
+            data_str = await websocket.receive_text()
+            try:
+                data = json.loads(data_str)
+                await transport.handle_response(device_id, data)
+            except json.JSONDecodeError:
+                continue
+    except WebSocketDisconnect:
+        transport.disconnect(device_id)

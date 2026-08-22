@@ -134,8 +134,8 @@ async def test_android_tool_execution(db_session: Session):
     )
     assert res.success
     output = res.output
-    assert output["status"] == "not_implemented"
-    assert "cannot return live data yet" in output["detail"]
+    assert output["status"] == "error"
+    assert "DEVICE_OFFLINE" in output["error"]
     
 @pytest.mark.asyncio
 async def test_android_permissions_and_emergency_stop(db_session: Session):
