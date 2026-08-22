@@ -22,7 +22,7 @@ class DeviceManager:
     def generate_pairing_code(self, principal_id: str, device_name_hint: str = "") -> DevicePairingCode:
         # Generate 6 digit alphanumeric code
         code = "".join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(6))
-        expires_at = datetime.now(timezone.utc) + timedelta(minutes=10)
+        expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
         
         record = DevicePairingCode(
             code=code,
@@ -54,7 +54,8 @@ class DeviceManager:
         if expires < now:
             raise DeviceAuthError("Pairing code expired")
             
-        record.used_at = now
+        # Delete code so it is strictly single-use and not stored
+        self.db.delete(record)
         
         device_id = str(uuid.uuid4())
         credential = secrets.token_urlsafe(32)
@@ -72,13 +73,10 @@ class DeviceManager:
         self.db.commit()
         return device_id, credential
         
-    def heartbeat(self, device_id: str, credential: str, principal_id: str) -> None:
+    def heartbeat(self, device_id: str, credential: str) -> str:
         device = self.db.get(DeviceRecord, device_id)
         if not device:
             raise DeviceAuthError("Device not found")
-            
-        if device.principal_id != principal_id:
-            raise DeviceAuthError("Device ownership mismatch")
             
         if device.status == "REVOKED":
             raise DeviceAuthError("Device revoked")
@@ -88,6 +86,7 @@ class DeviceManager:
             
         device.last_heartbeat = datetime.now(timezone.utc)
         self.db.commit()
+        return device.principal_id
 
     def get_device(self, device_id: str, principal_id: str) -> DeviceRecord:
         device = self.db.get(DeviceRecord, device_id)

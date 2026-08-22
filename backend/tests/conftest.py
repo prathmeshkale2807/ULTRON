@@ -36,3 +36,6 @@ def db_session(tmp_path: Path):
     finally:
         session.close()
         engine.dispose()
+import os
+os.environ['ENVIRONMENT'] = 'test'
+

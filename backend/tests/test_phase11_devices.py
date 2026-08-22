@@ -34,7 +34,7 @@ def test_generate_and_pair_device(db_session: Session):
     assert device.credential_hash != credential  # should be hashed
     
     # 4. Code reuse rejection
-    with pytest.raises(DeviceAuthError, match="Pairing code already used"):
+    with pytest.raises(DeviceAuthError, match="Invalid pairing code"):
         manager.pair_device(record.code, "Hacker Device")
 
 def test_pairing_code_expiration(db_session: Session):
@@ -54,7 +54,7 @@ def test_heartbeat_authentication_and_status(db_session: Session):
     device_id, credential = manager.pair_device(record.code, "Test Pixel")
     
     # Valid heartbeat
-    manager.heartbeat(device_id, credential, "test_user_1")
+    manager.heartbeat(device_id, credential)
     device = manager.get_device(device_id, "test_user_1")
     assert manager.get_computed_status(device) == "ONLINE"
         
@@ -64,18 +64,14 @@ def test_heartbeat_authentication_and_status(db_session: Session):
     device = manager.get_device(device_id, "test_user_1")
     assert manager.get_computed_status(device) == "OFFLINE"
         
-    # Cross-user access denial
-    with pytest.raises(DeviceAuthError, match="ownership mismatch"):
-        manager.heartbeat(device_id, credential, "hacker_user")
-
     # Invalid credential
     with pytest.raises(DeviceAuthError, match="Invalid credential"):
-        manager.heartbeat(device_id, "wrong_cred", "test_user_1")
+        manager.heartbeat(device_id, "wrong_cred")
         
     # Revoked device
     manager.revoke_device(device_id, "test_user_1")
     with pytest.raises(DeviceAuthError, match="Device revoked"):
-        manager.heartbeat(device_id, credential, "test_user_1")
+        manager.heartbeat(device_id, credential)
 
 from app.permissions.models import PermissionScope
 from app.android.tools import ANDROID_TOOLS

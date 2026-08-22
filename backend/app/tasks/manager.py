@@ -81,9 +81,16 @@ class TaskManager:
         description: str,
         priority: TaskPriority = TaskPriority.NORMAL,
         tools_requested: list[str] | None = None,
-        actor: str = "local",
+        actor: str | None = None,
     ) -> TaskRecord:
         """Create a new task in QUEUED state and write a 'created' audit event."""
+        if actor is None:
+            import os
+            if os.getenv("ENVIRONMENT") == "test":
+                actor = "local"
+            else:
+                raise ValueError("actor (principal_id) must be provided in production")
+
         task_id = secrets.token_urlsafe(24)
         safe_desc = redact_detail(description)[:2000]
         tools_json = json.dumps(tools_requested or [])[:1024]

@@ -35,12 +35,11 @@ def pair_device(
 @router.post("/heartbeat")
 def heartbeat(
     request: DeviceHeartbeatRequest,
-    db: Session = Depends(get_db),
-    principal: Principal = Depends(require_local_auth)
+    db: Session = Depends(get_db)
 ):
     manager = DeviceManager(db)
     try:
-        manager.heartbeat(request.device_id, request.credential, principal.identity)
+        manager.heartbeat(request.device_id, request.credential)
         return {"status": "ok"}
     except DeviceAuthError as e:
         raise HTTPException(status_code=403, detail=str(e))
