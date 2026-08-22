@@ -175,10 +175,7 @@ async def test_tool_executor_rejects_arbitrary_shell(db_session):
         executor.confirmation_broker.resolve(req.id, approved=True)
         return True
         
-    result = await executor.execute(
-        "windows_open_application",
-        {"app_name": "cmd.exe /c echo hacked"},
-        target_device=DeviceType.PC,
+    result = await executor.execute("windows_open_application", {"app_name": "cmd.exe /c echo hacked"}, target_device=DeviceType.PC, principal_id="local",
         session_id="test_session",
         confirmation_callback=approve
     )
@@ -195,10 +192,7 @@ async def test_screenshot_requires_confirmation(db_session):
     # Background execution without confirmation broker pre-approved should fail or timeout
     import app.executor.executor as exec_mod
     with pytest.raises(exec_mod.ConfirmationTimeoutError):
-        await executor.execute(
-            "windows_take_screenshot",
-            {},
-            target_device=DeviceType.PC,
+        await executor.execute("windows_take_screenshot", {}, target_device=DeviceType.PC, principal_id="local",
             session_id="test_session",
             confirmation_timeout_seconds=0.1
         )
@@ -211,10 +205,7 @@ async def test_missing_permission_rejected(db_session):
     
     import app.executor.executor as exec_mod
     with pytest.raises(exec_mod.PermissionDeniedError):
-        await executor.execute(
-            "windows_open_application",
-            {"app_name": "notepad"},
-            target_device=DeviceType.PC,
+        await executor.execute("windows_open_application", {"app_name": "notepad"}, target_device=DeviceType.PC, principal_id="local",
             session_id="test_session"
         )
 
@@ -227,10 +218,7 @@ async def test_audit_logging_windows(db_session):
         executor.confirmation_broker.resolve(req.id, approved=True)
         return True
         
-    await executor.execute(
-        "windows_get_system_info",
-        {},
-        target_device=DeviceType.PC,
+    await executor.execute("windows_get_system_info", {}, target_device=DeviceType.PC, principal_id="local",
         session_id="test_session",
         confirmation_callback=approve
     )
@@ -249,10 +237,7 @@ async def test_wrong_device_rejected(db_session):
         
     import app.executor.executor as exec_mod
     with pytest.raises(exec_mod.DeviceValidationError):
-        await executor.execute(
-            "windows_get_system_info",
-            {},
-            target_device=DeviceType.ANDROID, # Windows tools are PC only
+        await executor.execute("windows_get_system_info", {}, target_device=DeviceType.ANDROID, principal_id="local", # Windows tools are PC only
             session_id="test_session",
             confirmation_callback=approve
         )
@@ -274,10 +259,7 @@ async def test_verification_engine_close_app(db_session):
          
          mock_close.return_value = {"success": True, "message": "Closed"}
          mock_verify.return_value = True # Simulate verification success
-         result = await executor.execute(
-            "windows_close_application",
-            {"app_name": "notepad"},
-            target_device=DeviceType.PC,
+         result = await executor.execute("windows_close_application", {"app_name": "notepad"}, target_device=DeviceType.PC, principal_id="local",
             session_id="test_session",
             confirmation_callback=approve
         )

@@ -166,12 +166,14 @@ class ToolExecutor:
         *,
         target_device: DeviceType,
         session_id: str | None = None,
-        principal_id: str = "local",
+        principal_id: str | None = None,
         task_id: str | None = None,
         requested_action: str | None = None,
         confirmation_callback: Any = None,
         confirmation_timeout_seconds: float = 120.0,
     ) -> ToolExecutionResult:
+        if principal_id is None:
+            raise ValueError("principal_id must be explicitly provided.")
         """confirmation_callback, if given, is a callable (sync or async)
         taking the ConfirmationRequest and returning bool -- used by
         tests and fully-automated policies. Without it, a required

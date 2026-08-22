@@ -175,7 +175,7 @@ async def test_execute_unknown_tool_is_rejected(db_session) -> None:
     _, executor = make_executor(db_session)
 
     with pytest.raises(ToolNotFoundError):
-        await executor.execute("does.not.exist", {}, target_device=DeviceType.PC)
+        await executor.execute("does.not.exist", {}, target_device=DeviceType.PC, principal_id="local")
 
     row = latest_audit_row(db_session)
     assert row.execution_result == "rejected_unknown_tool"
@@ -187,7 +187,7 @@ async def test_execute_rejects_disabled_tool(db_session) -> None:
     registry.set_enabled("mock.echo", False)
 
     with pytest.raises(ToolDisabledError):
-        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert latest_audit_row(db_session).execution_result == "rejected_tool_disabled"
 
@@ -198,7 +198,7 @@ async def test_execute_rejects_malformed_arguments(db_session) -> None:
 
     with pytest.raises(SchemaValidationError):
         # missing required "path"
-        await executor.execute("mock.echo", {}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {}, target_device=DeviceType.PC, principal_id="local")
 
     assert latest_audit_row(db_session).execution_result == "rejected_malformed_arguments"
 
@@ -208,10 +208,7 @@ async def test_execute_rejects_malicious_extra_arguments(db_session) -> None:
     registry.register(make_tool())
 
     with pytest.raises(SchemaValidationError):
-        await executor.execute(
-            "mock.echo",
-            {"path": "ok.txt", "__proto__": {"admin": True}},
-            target_device=DeviceType.PC,
+        await executor.execute("mock.echo", {"path": "ok.txt", "__proto__": {"admin": True}}, target_device=DeviceType.PC, principal_id="local",
         )
 
     assert latest_audit_row(db_session).execution_result == "rejected_malformed_arguments"
@@ -222,7 +219,7 @@ async def test_execute_rejects_wrong_type_argument(db_session) -> None:
     registry.register(make_tool())
 
     with pytest.raises(SchemaValidationError):
-        await executor.execute("mock.echo", {"path": 12345}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {"path": 12345}, target_device=DeviceType.PC, principal_id="local")
 
 
 async def test_execute_rejects_invalid_tool_schema_itself(db_session) -> None:
@@ -232,7 +229,7 @@ async def test_execute_rejects_invalid_tool_schema_itself(db_session) -> None:
     registry.register(make_tool(input_schema={"type": "object", "properties": "nope"}))
 
     with pytest.raises(SchemaValidationError):
-        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert latest_audit_row(db_session).execution_result == "rejected_invalid_tool_schema"
 
@@ -242,7 +239,7 @@ async def test_execute_rejects_wrong_device(db_session) -> None:
     registry.register(make_tool(allowed_devices=[DeviceType.ANDROID]))
 
     with pytest.raises(DeviceValidationError):
-        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert latest_audit_row(db_session).execution_result == "rejected_unauthorized_device"
 
@@ -254,7 +251,7 @@ async def test_execute_blocks_configured_risk_level(db_session) -> None:
     registry.register(make_tool(risk_level=RiskLevel.HIGH))
 
     with pytest.raises(RiskRejectedError):
-        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert latest_audit_row(db_session).execution_result == "rejected_risk_blocked"
 
@@ -267,7 +264,7 @@ async def test_execute_rejects_missing_permission(db_session) -> None:
     registry.register(make_tool())
 
     with pytest.raises(PermissionDeniedError):
-        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     row = latest_audit_row(db_session)
     assert row.execution_result == "rejected_missing_permission"
@@ -280,7 +277,7 @@ async def test_execute_rejects_denied_permission(db_session) -> None:
     executor.permission_store.revoke(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     with pytest.raises(PermissionDeniedError):
-        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     row = latest_audit_row(db_session)
     assert row.execution_result == "rejected_permission_denied"
@@ -295,10 +292,7 @@ async def test_execute_succeeds_after_confirmation_approved(db_session) -> None:
     registry.register(make_tool())
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
-    result = await executor.execute(
-        "mock.echo",
-        {"path": "x"},
-        target_device=DeviceType.PC,
+    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
         confirmation_callback=lambda req: True,
     )
 
@@ -315,10 +309,7 @@ async def test_execute_raises_when_confirmation_denied(db_session) -> None:
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     with pytest.raises(ConfirmationDeniedError):
-        await executor.execute(
-            "mock.echo",
-            {"path": "x"},
-            target_device=DeviceType.PC,
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
             confirmation_callback=lambda req: False,
         )
 
@@ -333,10 +324,7 @@ async def test_execute_raises_when_confirmation_times_out(db_session) -> None:
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     with pytest.raises(ConfirmationTimeoutError):
-        await executor.execute(
-            "mock.echo",
-            {"path": "x"},
-            target_device=DeviceType.PC,
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
             confirmation_timeout_seconds=0.05,
         )
 
@@ -353,10 +341,7 @@ async def test_ask_once_per_session_skips_confirmation_on_second_call(db_session
     registry.register(make_tool(confirmation_tier=ConfirmationTier.ASK_ONCE_PER_SESSION))
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
-    first = await executor.execute(
-        "mock.echo",
-        {"path": "x"},
-        target_device=DeviceType.PC,
+    first = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
         session_id="s1",
         confirmation_callback=lambda req: True,
     )
@@ -364,10 +349,7 @@ async def test_ask_once_per_session_skips_confirmation_on_second_call(db_session
     # incorrectly asked again, this would hang waiting on the broker
     # until the default 120s timeout -- so a fast pass here proves it
     # was skipped, not just "eventually allowed".
-    second = await executor.execute(
-        "mock.echo",
-        {"path": "x"},
-        target_device=DeviceType.PC,
+    second = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
         session_id="s1",
         confirmation_timeout_seconds=0.2,
     )
@@ -392,10 +374,7 @@ async def test_always_ask_cannot_be_bypassed_across_repeated_calls(db_session) -
         return True
 
     for _ in range(3):
-        result = await executor.execute(
-            "mock.echo",
-            {"path": "x"},
-            target_device=DeviceType.PC,
+        result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
             session_id="same-session",
             confirmation_callback=approve,
         )
@@ -420,17 +399,11 @@ async def test_trusted_mode_cannot_bypass_always_ask(db_session) -> None:
         call_count["n"] += 1
         return True
 
-    await executor.execute(
-        "mock.echo",
-        {"path": "x"},
-        target_device=DeviceType.PC,
+    await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
         session_id="trusted-session",
         confirmation_callback=approve,
     )
-    await executor.execute(
-        "mock.echo",
-        {"path": "x"},
-        target_device=DeviceType.PC,
+    await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
         session_id="trusted-session",
         confirmation_callback=approve,
     )
@@ -443,8 +416,7 @@ async def test_trusted_mode_cannot_bypass_always_ask(db_session) -> None:
     # real floor rather than Trusted Mode just always asking anyway.
     registry.register(make_tool(name="mock.echo.auto", confirmation_tier=ConfirmationTier.AUTOMATIC))
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
-    auto_result = await executor.execute(
-        "mock.echo.auto", {"path": "x"}, target_device=DeviceType.PC
+    auto_result = await executor.execute("mock.echo.auto", {"path": "x"}, target_device=DeviceType.PC, principal_id="local"
     )
     assert auto_result.success is True
 
@@ -456,16 +428,12 @@ async def test_session_permission_grant_is_scoped_to_its_session(db_session) -> 
         PermissionCategory.FILE_READ, PermissionScope.SESSION, session_id="granted-session"
     )
 
-    ok = await executor.execute(
-        "mock.echo", {"path": "x"}, target_device=DeviceType.PC, session_id="granted-session"
+    ok = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local", session_id="granted-session"
     )
     assert ok.success is True
 
     with pytest.raises(PermissionDeniedError):
-        await executor.execute(
-            "mock.echo",
-            {"path": "x"},
-            target_device=DeviceType.PC,
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
             session_id="different-session",
         )
 
@@ -479,7 +447,7 @@ async def test_tool_execution_timeout_is_enforced(db_session) -> None:
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     with pytest.raises(ToolTimeoutError):
-        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert latest_audit_row(db_session).execution_result == "timed_out"
 
@@ -489,7 +457,7 @@ async def test_handler_error_without_retry_returns_failure_result(db_session) ->
     registry.register(make_tool(handler=failing_handler))
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
-    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert result.success is False
     assert "mock tool failure" in (result.error or "")
@@ -504,7 +472,7 @@ async def test_retry_policy_retries_then_succeeds(db_session) -> None:
     )
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
-    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert result.success is True
     assert result.output == {"attempt": 2}
@@ -527,7 +495,7 @@ async def test_verification_callback_marks_verified_or_failed(db_session) -> Non
     )
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
-    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert result.success is True
     assert latest_audit_row(db_session).verification_result == "verified"
@@ -540,7 +508,7 @@ async def test_invalid_output_schema_is_rejected(db_session) -> None:
     registry.register(make_tool(output_schema={"type": "object", "required": ["must_exist"]}))
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
-    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert result.success is False
     assert result.stage == "output_validation"
@@ -561,7 +529,7 @@ async def test_failed_verification_is_not_reported_as_success(db_session) -> Non
     )
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
-    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert result.success is False
     assert result.output is None
@@ -587,12 +555,12 @@ async def test_emergency_stop_blocks_new_tool_execution(db_session) -> None:
     stop.activate(reason="test halt", activated_by="tester")
 
     with pytest.raises(EmergencyStopEngagedError):
-        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+        await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
     assert latest_audit_row(db_session).execution_result == "blocked_emergency_stop"
 
     stop.reset(reset_by="tester")
-    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC)
+    result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
     assert result.success is True
 
 
@@ -617,8 +585,7 @@ async def test_audit_logging_records_full_pipeline(db_session) -> None:
     registry.register(make_tool())
     executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
-    result = await executor.execute(
-        "mock.echo", {"path": "secret-plan.txt"}, target_device=DeviceType.PC
+    result = await executor.execute("mock.echo", {"path": "secret-plan.txt"}, target_device=DeviceType.PC, principal_id="local"
     )
 
     assert result.success is True
@@ -643,3 +610,11 @@ async def test_ai_layer_never_touches_handler_directly(db_session) -> None:
     public = registry.get("mock.echo").public_metadata()
     assert "handler" not in public
     assert "verifier" not in public
+
+
+@pytest.mark.asyncio
+async def test_executor_missing_principal_fails(db_session, monkeypatch):
+    monkeypatch.delenv('ENVIRONMENT', raising=False)
+    _, executor = make_executor(db_session)
+    with pytest.raises(ValueError, match="principal_id must be explicitly provided"):
+        await executor.execute("mock.echo", {"path": "test"}, target_device=DeviceType.PC)
