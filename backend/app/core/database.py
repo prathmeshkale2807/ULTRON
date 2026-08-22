@@ -199,6 +199,7 @@ class TaskRecord(Base):
 
     task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    principal_id: Mapped[str] = mapped_column(String(128), default="local")
     description: Mapped[str] = mapped_column(String(2000), default="")
     priority: Mapped[str] = mapped_column(String(16), default="normal")
     state: Mapped[str] = mapped_column(String(32), default="queued", index=True)
@@ -290,6 +291,27 @@ class MemoryRecord(Base):
     expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
+
+class IdempotencyRecord(Base):
+    """Crash-safe idempotency for destructive actions like email_send.
+
+    Written BEFORE the external API call (status='pending'), updated to
+    'completed' or 'failed' after. On process restart, a 'pending' record
+    means the previous attempt's outcome is unknown -- the handler must
+    check the provider (e.g. Gmail sent folder) before retrying.
+    """
+    __tablename__ = "idempotency_keys"
+
+    idempotency_key: Mapped[str] = mapped_column(String(256), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)
+    tool_name: Mapped[str] = mapped_column(String(128), default="")
+    request_fingerprint: Mapped[str] = mapped_column(String(512), default="")
+    status: Mapped[str] = mapped_column(String(32), default="pending")
+    provider_message_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 def schema_is_current() -> bool:
     """True if the DB is migrated to the latest Alembic revision.
 
@@ -317,11 +339,17 @@ def schema_is_current() -> bool:
     return current_revision == head_revision
 
 
-def create_all_for_tests() -> None:
+def create_all_for_tests(bind=None) -> None:
     """Test-only helper. Production schema is owned by Alembic migrations
     (see backend/alembic/) -- this exists solely so the test suite can
-    stand up an isolated temp SQLite DB without running migrations."""
-    Base.metadata.create_all(bind=engine)
+    stand up an isolated temp SQLite DB without running migrations.
+
+    Pass `bind` (an Engine) to target a specific test database rather than
+    the module-level singleton engine. This is required when the calling
+    fixture creates its own isolated engine after monkeypatching DATABASE_URL.
+    """
+    target = bind if bind is not None else engine
+    Base.metadata.create_all(bind=target)
 
 
 def get_db() -> Generator[Session, None, None]:

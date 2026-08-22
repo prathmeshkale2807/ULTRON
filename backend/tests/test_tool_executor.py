@@ -56,23 +56,23 @@ from app.tools.registry import ToolAlreadyRegisteredError, ToolRegistry
 # --- mock tool handlers (test/mock tools only, per the Phase 3 spec) -----
 
 
-async def echo_handler(args: dict[str, Any]) -> dict[str, Any]:
+async def echo_handler(ctx, args: dict[str, Any]) -> dict[str, Any]:
     return {"echo": args}
 
 
-async def slow_handler(args: dict[str, Any]) -> dict[str, Any]:
+async def slow_handler(ctx, args: dict[str, Any]) -> dict[str, Any]:
     await asyncio.sleep(2.0)
     return {"ok": True}
 
 
-async def failing_handler(args: dict[str, Any]) -> dict[str, Any]:
+async def failing_handler(ctx, args: dict[str, Any]) -> dict[str, Any]:
     raise RuntimeError("mock tool failure")
 
 
 def make_flaky_handler(fail_times: int):
     calls = {"count": 0}
 
-    async def handler(args: dict[str, Any]) -> dict[str, Any]:
+    async def handler(ctx, args: dict[str, Any]) -> dict[str, Any]:
         calls["count"] += 1
         if calls["count"] <= fail_times:
             raise RuntimeError("transient mock failure")
@@ -516,7 +516,7 @@ async def test_retry_policy_retries_then_succeeds(db_session) -> None:
 async def test_verification_callback_marks_verified_or_failed(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
 
-    async def always_true_verifier(args, output):
+    async def always_true_verifier(ctx, args, output):
         return True
 
     registry.register(
@@ -550,7 +550,7 @@ async def test_invalid_output_schema_is_rejected(db_session) -> None:
 async def test_failed_verification_is_not_reported_as_success(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
 
-    async def always_false_verifier(args, output):
+    async def always_false_verifier(ctx, args, output):
         return False
 
     registry.register(

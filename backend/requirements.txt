@@ -9,6 +9,8 @@ pydantic-settings==2.5.2
 sqlalchemy==2.0.35
 alembic==1.13.3
 jsonschema==4.23.0
+# Cross-platform IANA timezone data (required on Windows; zoneinfo uses it automatically)
+tzdata==2026.3
 
 # Windows PC Control (Phase 6)
 psutil==6.1.1

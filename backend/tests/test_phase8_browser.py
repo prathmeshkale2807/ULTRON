@@ -102,22 +102,25 @@ async def test_redirects_are_validated():
 @pytest.mark.asyncio
 async def test_tools_return_structured_untrusted_data():
     from app.browser.tools import browser_get_page_handler, browser_extract_text_handler
-    
+    from app.tools.models import ExecutionContext
+
     manager = get_browser_manager()
     await manager.startup()
     try:
         ctx = await manager.get_or_create_context("test_structured")
         page = await ctx.new_page()
         await page.set_content("<html><title>Untrusted Title</title><body>Untrusted Body</body></html>")
-        
+
+        exec_ctx = ExecutionContext(principal_id="test_user", session_id="test_structured")
+
         # Test get_page
-        result1 = await browser_get_page_handler({}, {"session_id": "test_structured"})
+        result1 = await browser_get_page_handler(exec_ctx, {})
         assert "is_untrusted_data" in result1
         assert result1["is_untrusted_data"] is True
         assert "UNTRUSTED_EXTERNAL_CONTENT START" in result1["title"]
-        
+
         # Test extract_text
-        result2 = await browser_extract_text_handler({"selector": "body"}, {"session_id": "test_structured"})
+        result2 = await browser_extract_text_handler(exec_ctx, {"selector": "body"})
         assert "is_untrusted_data" in result2
         assert result2["is_untrusted_data"] is True
         assert "UNTRUSTED_EXTERNAL_CONTENT START" in result2["content"]

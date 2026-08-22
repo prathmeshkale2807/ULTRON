@@ -62,7 +62,12 @@ def manager(db_session):
 
 @pytest.fixture()
 def client(monkeypatch, tmp_path: Path):
-    """Full FastAPI TestClient with isolated DB — same pattern as test_phase4_api_security.py."""
+    """Full FastAPI TestClient with isolated DB.
+
+    The module-level `engine` and `SessionLocal` in app.core.database are bound
+    once on first import. We must patch them directly so the FastAPI app's
+    get_db() dependency uses the tmp DB, not the real one.
+    """
     db_file = tmp_path / "test_ultron_p5.db"
     log_dir = tmp_path / "logs"
 
@@ -80,9 +85,17 @@ def client(monkeypatch, tmp_path: Path):
 
     get_provider_manager.cache_clear()
 
-    from app.core.database import create_all_for_tests
+    # Patch the module-level singletons so the FastAPI app routes to our tmp DB.
+    from sqlalchemy import create_engine as _make_engine
+    from sqlalchemy.orm import sessionmaker as _sessionmaker
+    import app.core.database as _db_module
 
-    create_all_for_tests()
+    _test_engine = _make_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
+    _db_module.Base.metadata.create_all(bind=_test_engine)
+    _test_session_local = _sessionmaker(autocommit=False, autoflush=False, bind=_test_engine)
+
+    monkeypatch.setattr(_db_module, "engine", _test_engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", _test_session_local)
 
     from app.api import health as health_module
 
@@ -98,6 +111,8 @@ def client(monkeypatch, tmp_path: Path):
 
     get_settings.cache_clear()
     get_provider_manager.cache_clear()
+    _test_engine.dispose()
+
 
 
 def _local_token() -> str:

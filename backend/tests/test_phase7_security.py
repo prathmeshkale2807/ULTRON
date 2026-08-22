@@ -36,11 +36,19 @@ def mock_provider_manager():
 def client(monkeypatch, tmp_path):
     db_file = tmp_path / "test_phase7_sec.db"
     monkeypatch.setenv("DATABASE_URL", f"sqlite:///{db_file}")
-    from app.core.database import create_all_for_tests
-    create_all_for_tests()
+    from sqlalchemy import create_engine as _make_engine
+    from sqlalchemy.orm import sessionmaker as _sessionmaker
+    import app.core.database as _db_module
+    _test_engine = _make_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})
+    _db_module.Base.metadata.create_all(bind=_test_engine)
+    _test_session_local = _sessionmaker(autocommit=False, autoflush=False, bind=_test_engine)
+    monkeypatch.setattr(_db_module, "engine", _test_engine)
+    monkeypatch.setattr(_db_module, "SessionLocal", _test_session_local)
     from fastapi.testclient import TestClient
     from app.main import app
-    return TestClient(app)
+    client = TestClient(app)
+    yield client
+    _test_engine.dispose()
 
 @pytest.fixture(autouse=True)
 def setup_windows_tools(client):
