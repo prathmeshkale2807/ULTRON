@@ -97,13 +97,19 @@ def test_health_endpoint_reports_real_database(client):
     assert components["ai_provider.claude"]["status"] == "not_configured"
     assert components["ai_provider.gemini"]["status"] == "not_configured"
 
+    # New Phase 11 & PC execution components are now implemented
+    assert components["device_manager"]["status"] == "ok"
+    assert "table accessible" in components["device_manager"]["detail"]
+
+    assert components["android_companion"]["status"] == "ok"
+    assert "pairing APIs available" in components["android_companion"]["detail"]
+
+    assert components["windows_control"]["status"] == "ok"
+
     # Everything not yet built must be honest about it -- this is the
     # "no fake capabilities" rule, enforced by a test, not just a promise.
     for name in (
-        "device_manager",
         "voice_engine",
-        "android_companion",
-        "windows_control",
     ):
         assert components[name]["status"] == "not_implemented"
 

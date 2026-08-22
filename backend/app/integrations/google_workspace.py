@@ -56,3 +56,21 @@ def revoke_credentials(principal_id: str) -> None:
         keyring.delete_password(SERVICE_NAME, _get_keyring_key(principal_id))
     except keyring.errors.PasswordDeleteError:
         pass
+
+
+def get_oauth_flow(scopes: list[str], state: str | None = None):
+    """Creates a Google OAuth Flow object using secure backend credentials."""
+    from google_auth_oauthlib.flow import Flow
+    settings = get_settings()
+    client_config = {
+        "web": {
+            "client_id": settings.google_client_id,
+            "project_id": "ultron",
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_secret": settings.google_client_secret,
+        }
+    }
+    flow = Flow.from_client_config(client_config, scopes=scopes, state=state)
+    flow.redirect_uri = "http://localhost:8000/api/google/callback"
+    return flow

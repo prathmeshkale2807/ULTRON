@@ -166,6 +166,8 @@ class ToolExecutor:
         *,
         target_device: DeviceType,
         session_id: str | None = None,
+        principal_id: str = "local",
+        task_id: str | None = None,
         requested_action: str | None = None,
         confirmation_callback: Any = None,
         confirmation_timeout_seconds: float = 120.0,
@@ -253,6 +255,25 @@ class ToolExecutor:
             raise DeviceValidationError(
                 f"tool '{tool_name}' is not allowed on device '{target_device.value}'"
             )
+
+        if target_device == DeviceType.ANDROID:
+            # Phase 11: verify the requested device exists and is owned by principal
+            target_device_id = arguments.get("target_device_id")
+            if not target_device_id:
+                execution_result = "rejected_unauthorized_device"
+                _audit("Android execution requires 'target_device_id' argument")
+                raise DeviceValidationError("Android execution requires 'target_device_id' argument")
+                
+            from app.core.database import DeviceRecord
+            device_record = self.db.get(DeviceRecord, target_device_id)
+            if not device_record or device_record.principal_id != principal_id:
+                execution_result = "rejected_unauthorized_device"
+                _audit("Android device not found or ownership mismatch")
+                raise DeviceValidationError("Android device not found or ownership mismatch")
+            if device_record.status == "REVOKED":
+                execution_result = "rejected_unauthorized_device"
+                _audit("Android device is revoked")
+                raise DeviceValidationError("Android device is revoked")
 
         # --- Stage 4: permission validation -------------------------------
         # Opt-in model: a permission category must have been EXPLICITLY
@@ -350,7 +371,7 @@ class ToolExecutor:
             confirmation_result = "not_required"
 
         # --- Stage 6: execution --------------------------------------------
-        output, exec_error = await self._run_with_retries(tool, arguments, session_id)
+        output, exec_error = await self._run_with_retries(tool, arguments, session_id, principal_id, task_id)
         if exec_error is not None:
             execution_result = (
                 "timed_out" if isinstance(exec_error, asyncio.TimeoutError) else "error"
@@ -393,7 +414,7 @@ class ToolExecutor:
             )
 
         # --- Stage 7b: verification -----------------------------------------
-        verification_result = await self._verify(tool, arguments, output or {})
+        verification_result = await self._verify(tool, arguments, output or {}, session_id, principal_id, task_id)
 
         # Only verified / explicitly-not-required results may be reported as
         # successful. A failed callback or pending manual verification is not
@@ -438,19 +459,27 @@ class ToolExecutor:
         return resolved.status == ConfirmationStatus.APPROVED
 
     async def _run_with_retries(
-        self, tool: ToolDefinition, arguments: dict[str, Any], session_id: str | None
+        self, tool: ToolDefinition, arguments: dict[str, Any],
+        session_id: str | None, principal_id: str, task_id: str | None = None
     ) -> tuple[dict[str, Any] | None, Exception | None]:
+        from app.tools.models import ExecutionContext, RESERVED_INTERNAL_KEYS
         policy = tool.retry_policy
         last_error: Exception | None = None
 
-        # Inject session_id for tools that need auth
-        if session_id:
-            arguments["_session_id"] = session_id
+        # Server-created execution context -- the AI never controls these fields.
+        ctx = ExecutionContext(
+            principal_id=principal_id,
+            session_id=session_id,
+            task_id=task_id,
+        )
+
+        # Strip any reserved internal keys the AI may have injected.
+        clean_args = {k: v for k, v in arguments.items() if k not in RESERVED_INTERNAL_KEYS}
 
         for attempt in range(1, policy.max_attempts + 1):
             try:
                 output = await asyncio.wait_for(
-                    tool.handler(arguments), timeout=tool.timeout_seconds
+                    tool.handler(ctx, clean_args), timeout=tool.timeout_seconds
                 )
                 return output, None
             except asyncio.TimeoutError as exc:
@@ -466,9 +495,10 @@ class ToolExecutor:
         return None, last_error
 
     async def _verify(
-        self, tool: ToolDefinition, arguments: dict[str, Any], output: dict[str, Any]
+        self, tool: ToolDefinition, arguments: dict[str, Any], output: dict[str, Any],
+        session_id: str | None = None, principal_id: str = "local", task_id: str | None = None
     ) -> str:
-        from app.tools.models import VerificationMethod
+        from app.tools.models import VerificationMethod, ExecutionContext, RESERVED_INTERNAL_KEYS
 
         if tool.verification_method == VerificationMethod.NONE:
             return "not_required"
@@ -477,8 +507,10 @@ class ToolExecutor:
         if tool.verification_method == VerificationMethod.CALLBACK:
             if tool.verifier is None:
                 return "misconfigured_no_verifier"
+            ctx = ExecutionContext(principal_id=principal_id, session_id=session_id, task_id=task_id)
+            clean_args = {k: v for k, v in arguments.items() if k not in RESERVED_INTERNAL_KEYS}
             try:
-                ok = await tool.verifier(arguments, output)
+                ok = await tool.verifier(ctx, clean_args, output)
             except Exception as exc:  # noqa: BLE001
                 logger.exception("Verifier raised for tool %s", tool.name)
                 return f"verifier_error:{exc}"[:32]

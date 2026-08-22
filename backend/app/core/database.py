@@ -312,6 +312,36 @@ class IdempotencyRecord(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class DevicePairingCode(Base):
+    """Phase 11: One-time, short-lived code for pairing an Android device.
+    Owned by a principal_id. Once used, the code is consumed to mint a credential."""
+    __tablename__ = "device_pairing_codes"
+
+    code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    device_name_hint: Mapped[str] = mapped_column(String(128), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class DeviceRecord(Base):
+    """Phase 11: Registered Android devices.
+    Contains the credential hash and tracks the status/last heartbeat.
+    All operations must verify principal ownership."""
+    __tablename__ = "device_records"
+
+    device_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)
+    name: Mapped[str] = mapped_column(String(128), default="Android Device")
+    device_type: Mapped[str] = mapped_column(String(32), default="ANDROID")
+    credential_hash: Mapped[str] = mapped_column(String(256))
+    status: Mapped[str] = mapped_column(String(32), default="PAIRED")
+    last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 def schema_is_current() -> bool:
     """True if the DB is migrated to the latest Alembic revision.
 

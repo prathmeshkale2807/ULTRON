@@ -57,6 +57,11 @@ async def lifespan(app: FastAPI):
     for tool in CALENDAR_TOOLS:
         get_registry().register(tool, replace=True)
 
+    # Register Android Tools (Phase 11)
+    from app.android.tools import ANDROID_TOOLS
+    for tool in ANDROID_TOOLS:
+        get_registry().register(tool, replace=True)
+
     # Start the task worker pool (Phase 5).
     from app.tasks.worker import get_task_worker
 

@@ -6,6 +6,7 @@ from typing import Any
 import os
 
 from app.tools.models import (
+    ExecutionContext,
     ToolDefinition,
     RiskLevel,
     PermissionCategory,
@@ -23,10 +24,10 @@ from app.windows.screenshot import take_screenshot
 # Handlers and Verifiers
 # ==============================================================================
 
-async def handle_open_application(arguments: dict[str, Any]) -> dict[str, Any]:
+async def handle_open_application(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
     return open_application(arguments["app_name"])
 
-async def verify_open_application(arguments: dict[str, Any], result: dict[str, Any]) -> bool:
+async def verify_open_application(ctx: ExecutionContext, arguments: dict[str, Any], result: dict[str, Any]) -> bool:
     if not result.get("success"):
         return False
     
@@ -45,12 +46,12 @@ async def verify_open_application(arguments: dict[str, Any], result: dict[str, A
         
     return False
 
-async def handle_close_application(arguments: dict[str, Any]) -> dict[str, Any]:
+async def handle_close_application(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
     app_name = arguments.get("app_name")
     pid = arguments.get("pid")
     return close_application(app_name, pid)
 
-async def verify_close_application(arguments: dict[str, Any], result: dict[str, Any]) -> bool:
+async def verify_close_application(ctx: ExecutionContext, arguments: dict[str, Any], result: dict[str, Any]) -> bool:
     if not result.get("success"):
         return False
     app_name = arguments.get("app_name")
@@ -82,23 +83,23 @@ async def verify_close_application(arguments: dict[str, Any], result: dict[str, 
             pass
     return True
 
-async def handle_list_running_applications(arguments: dict[str, Any]) -> dict[str, Any]:
+async def handle_list_running_applications(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
     return list_running_applications()
 
-async def handle_get_system_info(arguments: dict[str, Any]) -> dict[str, Any]:
+async def handle_get_system_info(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
     return get_system_info()
 
-async def handle_take_screenshot(arguments: dict[str, Any]) -> dict[str, Any]:
+async def handle_take_screenshot(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
     return take_screenshot()
 
-async def verify_take_screenshot(arguments: dict[str, Any], result: dict[str, Any]) -> bool:
+async def verify_take_screenshot(ctx: ExecutionContext, arguments: dict[str, Any], result: dict[str, Any]) -> bool:
     if not result.get("success"):
         return False
     if "image_base64_secret" in result and len(result["image_base64_secret"]) > 0:
         return True
     return False
 
-async def handle_get_active_window(arguments: dict[str, Any]) -> dict[str, Any]:
+async def handle_get_active_window(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
     return get_active_window()
 
 # ==============================================================================

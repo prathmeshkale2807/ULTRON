@@ -4,6 +4,7 @@ from typing import Any
 
 from app.tools.registry import ToolRegistry
 from app.tools.models import (
+    ExecutionContext,
     ToolDefinition, 
     PermissionCategory, 
     ConfirmationTier, 
@@ -17,10 +18,9 @@ from app.browser.safety import wrap_untrusted_content, check_sensitive_field
 
 logger = logging.getLogger(__name__)
 
-async def browser_open_handler(args: dict[str, Any], context: dict[str, Any] = None) -> dict[str, Any]:
+async def browser_open_handler(ctx: ExecutionContext, args: dict[str, Any]) -> dict[str, Any]:
     """Open or get the isolated browser context for this session."""
-    context = context or {}
-    session_id = context.get("session_id")
+    session_id = ctx.session_id
     if not session_id:
         return {"error": "No session_id provided."}
     
@@ -32,9 +32,8 @@ async def browser_open_handler(args: dict[str, Any], context: dict[str, Any] = N
     
     return {"status": "success", "message": "Browser session active."}
 
-async def browser_navigate_handler(args: dict[str, Any], context: dict[str, Any] = None) -> dict[str, Any]:
-    context = context or {}
-    session_id = context.get("session_id")
+async def browser_navigate_handler(ctx: ExecutionContext, args: dict[str, Any]) -> dict[str, Any]:
+    session_id = ctx.session_id
     url = args.get("url")
     if not session_id or not url:
         return {"error": "Missing session_id or url."}
@@ -56,9 +55,8 @@ async def browser_navigate_handler(args: dict[str, Any], context: dict[str, Any]
         "status_code": response.status
     }
 
-async def browser_get_page_handler(args: dict[str, Any], context: dict[str, Any] = None) -> dict[str, Any]:
-    context = context or {}
-    session_id = context.get("session_id")
+async def browser_get_page_handler(ctx: ExecutionContext, args: dict[str, Any]) -> dict[str, Any]:
+    session_id = ctx.session_id
     if not session_id:
         return {"error": "No session_id provided."}
         
@@ -74,9 +72,8 @@ async def browser_get_page_handler(args: dict[str, Any], context: dict[str, Any]
         "is_untrusted_data": True
     }
 
-async def browser_extract_text_handler(args: dict[str, Any], context: dict[str, Any] = None) -> dict[str, Any]:
-    context = context or {}
-    session_id = context.get("session_id")
+async def browser_extract_text_handler(ctx: ExecutionContext, args: dict[str, Any]) -> dict[str, Any]:
+    session_id = ctx.session_id
     selector = args.get("selector", "body")
     if not session_id:
         return {"error": "No session_id provided."}
@@ -99,9 +96,8 @@ async def browser_extract_text_handler(args: dict[str, Any], context: dict[str, 
     except Exception as e:
         return {"error": f"Failed to extract: {str(e)}"}
 
-async def browser_click_handler(args: dict[str, Any], context: dict[str, Any] = None) -> dict[str, Any]:
-    context = context or {}
-    session_id = context.get("session_id")
+async def browser_click_handler(ctx: ExecutionContext, args: dict[str, Any]) -> dict[str, Any]:
+    session_id = ctx.session_id
     selector = args.get("selector")
     if not session_id or not selector:
         return {"error": "Missing session_id or selector."}
@@ -117,9 +113,8 @@ async def browser_click_handler(args: dict[str, Any], context: dict[str, Any] = 
     except Exception as e:
         return {"error": f"Failed to click: {str(e)}"}
 
-async def browser_type_handler(args: dict[str, Any], context: dict[str, Any] = None) -> dict[str, Any]:
-    context = context or {}
-    session_id = context.get("session_id")
+async def browser_type_handler(ctx: ExecutionContext, args: dict[str, Any]) -> dict[str, Any]:
+    session_id = ctx.session_id
     selector = args.get("selector")
     text = args.get("text")
     if not session_id or not selector or text is None:
@@ -156,9 +151,8 @@ async def browser_type_handler(args: dict[str, Any], context: dict[str, Any] = N
     except Exception as e:
         return {"error": f"Failed to type: {str(e)}"}
 
-async def browser_screenshot_handler(args: dict[str, Any], context: dict[str, Any] = None) -> dict[str, Any]:
-    context = context or {}
-    session_id = context.get("session_id")
+async def browser_screenshot_handler(ctx: ExecutionContext, args: dict[str, Any]) -> dict[str, Any]:
+    session_id = ctx.session_id
     if not session_id:
         return {"error": "No session_id provided."}
         

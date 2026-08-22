@@ -248,6 +248,8 @@ async def _execute_task(task_id: str, *, session_factory: SessionFactory) -> Non
                     arguments=arguments,
                     target_device=device,
                     session_id=row.session_id,
+                    principal_id=getattr(row, 'principal_id', 'local'),
+                    task_id=task_id,
                 )
                 
                 if not result.success:

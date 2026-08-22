@@ -92,6 +92,7 @@ class TaskManager:
         row = TaskRecord(
             task_id=task_id,
             session_id=session_id,
+            principal_id=actor,
             description=safe_desc,
             priority=priority.value,
             state=TaskState.QUEUED.value,

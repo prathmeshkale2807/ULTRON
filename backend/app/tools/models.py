@@ -73,6 +73,12 @@ class PermissionCategory(str, Enum):
     PC_READ = "pc_read"
     PC_PROCESS_CONTROL = "pc_process_control"
     PC_SCREEN_CAPTURE = "pc_screen_capture"
+    
+    # Phase 11: Android Device
+    ANDROID_DEVICE_READ = "android_device_read"
+    ANDROID_LOCATION_READ = "android_location_read"
+    ANDROID_SMS_SEND = "android_sms_send"
+    
     OTHER = "other"
 
 
@@ -128,12 +134,45 @@ class RetryPolicy(BaseModel):
         return v
 
 
+# ---------------------------------------------------------------------------
+# Execution Context -- server-created, immutable, never AI-controlled.
+# ---------------------------------------------------------------------------
+from dataclasses import dataclass, field as dc_field
+import secrets as _secrets
+
+
+# Reserved argument keys that ToolExecutor strips from AI-supplied args.
+RESERVED_INTERNAL_KEYS = frozenset({
+    "_principal_id", "_session_id", "_task_id", "_request_id",
+    "_execution_context",
+})
+
+
+@dataclass(frozen=True)
+class ExecutionContext:
+    """Immutable, server-created context passed to every tool handler.
+
+    Fields are derived from the authenticated session and task record --
+    the AI layer NEVER supplies or overrides any of these values.
+    ToolExecutor strips RESERVED_INTERNAL_KEYS from AI arguments before
+    calling the handler.
+    """
+    principal_id: str
+    session_id: str | None = None
+    task_id: str | None = None
+    request_id: str = dc_field(default_factory=lambda: _secrets.token_urlsafe(12))
+
+
 # A tool handler is never a "direct call" from the AI -- it is only ever
 # invoked by ToolExecutor, after the full validation pipeline. Handlers
 # are plain async callables so Phase 3 test/mock tools can be simple
 # functions; nothing about this type implies real device access.
-ToolHandler = Callable[[dict[str, Any]], Awaitable[dict[str, Any]]]
-ToolVerifier = Callable[[dict[str, Any], dict[str, Any]], Awaitable[bool]]
+#
+# Phase 10 hardening: handlers now receive an ExecutionContext as the
+# first argument so they can derive identity server-side instead of
+# reading client-supplied fields from the arguments dict.
+ToolHandler = Callable[[ExecutionContext, dict[str, Any]], Awaitable[dict[str, Any]]]
+ToolVerifier = Callable[[ExecutionContext, dict[str, Any], dict[str, Any]], Awaitable[bool]]
 
 
 class ToolDefinition(BaseModel):
