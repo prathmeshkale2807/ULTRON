@@ -498,7 +498,7 @@ class ToolExecutor:
 
     async def _verify(
         self, tool: ToolDefinition, arguments: dict[str, Any], output: dict[str, Any],
-        session_id: str | None = None, principal_id: str = "local", task_id: str | None = None
+        session_id: str | None, principal_id: str, task_id: str | None = None
     ) -> str:
         from app.tools.models import VerificationMethod, ExecutionContext, RESERVED_INTERNAL_KEYS
 

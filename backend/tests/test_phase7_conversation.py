@@ -86,7 +86,7 @@ async def test_conversation_flow(client, mock_provider_manager):
     manager = ConversationManager(db, mock_provider_manager)
     conv_id = "test-conv-001"
     
-    response = await manager.process_turn(conv_id, "Open notepad", "sess-1")
+    response = await manager.process_turn(conv_id, "Open notepad", "sess-1", "local")
     assert response == "Done."
     
     conv = db.get(ConversationRecord, conv_id)

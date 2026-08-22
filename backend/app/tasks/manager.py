@@ -142,7 +142,7 @@ class TaskManager:
         task_id: str,
         *,
         session_id: str | None,
-        actor: str = "local",
+        actor: str,
     ) -> TaskRecord:
         """Request cancellation of a task.
 
@@ -189,7 +189,7 @@ class TaskManager:
         logger.info("Task cancel requested task_id=%s from=%s actor=%s", task_id, current.value, actor)
         return row
 
-    def pause(self, task_id: str, *, session_id: str | None, actor: str = "local") -> TaskRecord:
+    def pause(self, task_id: str, *, session_id: str | None, actor: str) -> TaskRecord:
         """Request a pause on a RUNNING task (cooperative between tool steps)."""
         row = self.get(task_id, session_id=session_id)
         current = TaskState(row.state)
@@ -200,7 +200,7 @@ class TaskManager:
         self._audit.record(task_id=task_id, event="pause_requested", actor=actor)
         return row
 
-    def resume(self, task_id: str, *, session_id: str | None, actor: str = "local") -> TaskRecord:
+    def resume(self, task_id: str, *, session_id: str | None, actor: str) -> TaskRecord:
         """Resume a PAUSED task."""
         row = self.get(task_id, session_id=session_id)
         current = TaskState(row.state)

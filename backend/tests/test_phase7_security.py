@@ -77,13 +77,13 @@ async def test_stale_plan_cancellation(client, mock_provider_manager):
     conv_id = "test-conv-sec-001"
     
     # Send first turn
-    await manager.process_turn(conv_id, "Action 1", "sess-1")
+    await manager.process_turn(conv_id, "Action 1", "sess-1", "local")
     conv = db.get(ConversationRecord, conv_id)
     first_task_id = conv.active_task_id
     assert first_task_id is not None
     
     # Send second turn immediately (superseding)
-    await manager.process_turn(conv_id, "Wait, Action 2 instead", "sess-1")
+    await manager.process_turn(conv_id, "Wait, Action 2 instead", "sess-1", "local")
     db.refresh(conv)
     second_task_id = conv.active_task_id
     
@@ -111,7 +111,7 @@ async def test_no_bypass_of_executor(client, mock_provider_manager):
     p_store = PermissionStore(db)
     p_store.grant(PermissionCategory.PC_READ, PermissionScope.SESSION, session_id="sess-1")
     
-    await manager.process_turn(conv_id, "Show running apps", "sess-1")
+    await manager.process_turn(conv_id, "Show running apps", "sess-1", "local")
     
     conv = db.get(ConversationRecord, conv_id)
     task_id = conv.active_task_id

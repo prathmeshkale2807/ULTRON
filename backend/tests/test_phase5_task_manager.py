@@ -421,7 +421,7 @@ def test_cancel_already_terminal_task_is_noop(manager) -> None:
     manager.transition_state(row.task_id, TaskState.COMPLETED)
 
     # Cancel of a completed task should return the task without error.
-    result = manager.cancel(row.task_id, session_id="sess-X")
+    result = manager.cancel(row.task_id, session_id="sess-X", actor="local")
     assert result.state == TaskState.COMPLETED.value
 
 
@@ -430,7 +430,7 @@ def test_cancel_wrong_session_raises_ownership_error(manager) -> None:
 
     row = manager.create(session_id="sess-A", description="d")
     with pytest.raises(OwnershipError):
-        manager.cancel(row.task_id, session_id="sess-B")
+        manager.cancel(row.task_id, session_id="sess-B", actor="local")
 
 
 def test_cancel_running_task_sets_cancellation_requested_at(manager) -> None:

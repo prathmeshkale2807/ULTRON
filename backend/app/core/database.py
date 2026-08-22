@@ -199,7 +199,7 @@ class TaskRecord(Base):
 
     task_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    principal_id: Mapped[str] = mapped_column(String(128), default="local")
+    principal_id: Mapped[str] = mapped_column(String(128), nullable=False)
     description: Mapped[str] = mapped_column(String(2000), default="")
     priority: Mapped[str] = mapped_column(String(16), default="normal")
     state: Mapped[str] = mapped_column(String(32), default="queued", index=True)

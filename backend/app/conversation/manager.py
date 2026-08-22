@@ -57,7 +57,7 @@ class ConversationManager:
             history += f"{m.role.upper()}: {m.content}\n"
         return history
 
-    async def process_turn(self, conversation_id: str, user_text: str, session_id: str | None = None, principal_id: str = "local") -> str:
+    async def process_turn(self, conversation_id: str, user_text: str, session_id: str | None, principal_id: str) -> str:
         conv = self.get_or_create(conversation_id, session_id)
         self.add_message(conversation_id, MessageRoleEnum.USER, user_text)
         
