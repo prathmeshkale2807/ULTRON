@@ -28,6 +28,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import Callable
+from app.executor.executor import ToolExecutionError
 from typing import Any
 
 from app.core.logging_config import get_logger
@@ -235,13 +236,22 @@ async def _execute_task(task_id: str, *, session_factory: SessionFactory) -> Non
                 )
                 logger.info("Task step executing: task_id=%s tool=%s args=%s", task_id, tool_name, arguments)
 
-                from app.executor.executor import ToolExecutor
+                from app.executor.executor import ToolExecutor, ToolExecutionError
                 from app.tools.registry import get_registry
-                executor = ToolExecutor(db=db, registry=get_registry())
+                registry = get_registry()
+                executor = ToolExecutor(db=db, registry=registry)
                 
                 from app.tools.models import DeviceType
                 target_device_str = step.get("target_device") if isinstance(step, dict) else None
                 device = DeviceType(target_device_str) if target_device_str else DeviceType.PC
+                
+                # Check idempotency
+                is_idempotent = True
+                try:
+                    tool_def = registry.get(tool_name)
+                    is_idempotent = tool_def.is_idempotent
+                except Exception:
+                    pass
                 
                 result = await executor.execute(
                     tool_name=tool_name,
@@ -249,28 +259,33 @@ async def _execute_task(task_id: str, *, session_factory: SessionFactory) -> Non
                     target_device=device,
                     principal_id=row.principal_id,
                     session_id=row.session_id,
-                                        task_id=task_id,
+                    task_id=task_id,
                 )
                 
                 if not result.success:
+                    fail_state = TaskState.FAILED if is_idempotent else TaskState.NEEDS_RECONCILIATION
                     manager.transition_state(
                         task_id, 
-                        TaskState.FAILED, 
-                        error_summary=f"Step {tool_name} failed: {result.error_message}",
+                        fail_state, 
+                        error_summary=f"Step {tool_name} failed: {result.error}",
                         actor="worker"
                     )
                     return
 
-            # All steps done → VERIFYING → COMPLETED.
+            # All steps done
             manager.transition_state(task_id, TaskState.VERIFYING, actor="worker")
             manager.transition_state(task_id, TaskState.COMPLETED, actor="worker")
 
         except asyncio.CancelledError:
             _safe_transition(manager, task_id, TaskState.CANCELLED)
             raise
+        except ToolExecutionError as exc:
+            logger.warning("Task rejected task_id=%s: %s", task_id, exc)
+            _safe_transition(manager, task_id, TaskState.FAILED, error_summary=str(exc))
         except Exception as exc:  # noqa: BLE001
             logger.exception("Task failed task_id=%s", task_id)
-            _safe_transition(manager, task_id, TaskState.FAILED, error_summary=str(exc))
+            # Default to NEEDS_RECONCILIATION for unknown crash during execution
+            _safe_transition(manager, task_id, TaskState.NEEDS_RECONCILIATION, error_summary=str(exc))
         finally:
             mgr_module.unregister_token(task_id)
 

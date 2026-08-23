@@ -110,7 +110,7 @@ def test_authorized_permission_grant_succeeds_and_is_audited(client) -> None:
     )
     assert response.status_code == 200
 
-    check = client.get("/api/permissions/check", params={"category": "file_write"})
+    check = client.get("/api/permissions/check", params={"category": "file_write"}, headers=_auth_headers())
     assert check.json()["status"] == "granted"
 
 
@@ -165,7 +165,7 @@ def test_session_scoped_grant_requires_known_session(client) -> None:
 
 
 def test_session_scoped_grant_succeeds_with_valid_session(client) -> None:
-    session = client.post("/api/sessions").json()
+    session = client.post("/api/sessions", headers=_auth_headers()).json()
 
     response = client.post(
         "/api/permissions/grant",
@@ -180,8 +180,8 @@ def test_session_scoped_grant_succeeds_with_valid_session(client) -> None:
 
 
 def test_invalidated_session_rejects_further_session_scoped_grants(client) -> None:
-    session = client.post("/api/sessions").json()
-    client.post(f"/api/sessions/{session['session_id']}/invalidate")
+    session = client.post("/api/sessions", headers=_auth_headers()).json()
+    client.post(f"/api/sessions/{session['session_id']}/invalidate", headers=_auth_headers())
 
     response = client.post(
         "/api/permissions/grant",
@@ -449,7 +449,7 @@ def test_activated_by_spoofing_in_activate_is_impossible(client) -> None:
 
 def test_session_creation_with_no_ttl_uses_default(client) -> None:
     """Omitting ttl_seconds must not create a never-expiring session."""
-    response = client.post("/api/sessions")
+    response = client.post("/api/sessions", headers=_auth_headers())
     assert response.status_code == 200
     data = response.json()
     assert data["expires_at"] is not None  # always has an expiry
@@ -462,7 +462,7 @@ def test_session_creation_with_huge_ttl_is_clamped(client) -> None:
     from app.sessions.manager import DEFAULT_SESSION_TTL_SECONDS
 
     one_year_seconds = 365 * 24 * 3600
-    response = client.post("/api/sessions", params={"ttl_seconds": one_year_seconds})
+    response = client.post("/api/sessions", params={"ttl_seconds": one_year_seconds}, headers=_auth_headers())
     assert response.status_code == 200
     data = response.json()
 
@@ -476,7 +476,7 @@ def test_session_creation_with_huge_ttl_is_clamped(client) -> None:
 
 def test_session_creation_with_none_ttl_uses_default(client) -> None:
     """Omitting ttl_seconds (equivalent to None) results in a capped session."""
-    response = client.post("/api/sessions")
+    response = client.post("/api/sessions", headers=_auth_headers())
     assert response.status_code == 200
     assert response.json()["expires_at"] is not None
 

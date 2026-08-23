@@ -106,10 +106,10 @@ async def test_no_bypass_of_executor(client, mock_provider_manager):
     from app.tools.models import PermissionCategory
     from app.permissions.models import PermissionScope
     from app.core.database import SessionRecord
-    db.merge(SessionRecord(session_id="sess-1"))
+    db.merge(SessionRecord(session_id="sess-1", principal_id="local"))
     db.commit()
     p_store = PermissionStore(db)
-    p_store.grant(PermissionCategory.PC_READ, PermissionScope.SESSION, session_id="sess-1")
+    p_store.grant("local", PermissionCategory.PC_READ, PermissionScope.SESSION, session_id="sess-1")
     
     await manager.process_turn(conv_id, "Show running apps", "sess-1", "local")
     

@@ -40,10 +40,11 @@ class SessionManager:
     def __init__(self, db: DBSession) -> None:
         self.db = db
 
-    def create(self, *, ttl_seconds: float | None = DEFAULT_SESSION_TTL_SECONDS) -> SessionInfo:
+    def create(self, principal_id: str, *, ttl_seconds: float | None = DEFAULT_SESSION_TTL_SECONDS) -> SessionInfo:
         now = datetime.now(timezone.utc)
         expires_at = now + timedelta(seconds=ttl_seconds) if ttl_seconds else None
         row = SessionRecord(
+            principal_id=principal_id,
             session_id=secrets.token_urlsafe(24),
             created_at=now,
             expires_at=expires_at,
@@ -61,9 +62,14 @@ class SessionManager:
             return None
         return self._to_info(row)
 
-    def is_valid(self, session_id: str) -> bool:
-        info = self.get(session_id)
-        return info is not None and info.valid
+    def is_valid(self, session_id: str, principal_id: str | None = None) -> bool:
+        row = self.db.get(SessionRecord, session_id)
+        if row is None:
+            return False
+        if principal_id is not None and row.principal_id != principal_id:
+            return False
+        info = self._to_info(row)
+        return info.valid
 
     def invalidate(self, session_id: str) -> SessionInfo | None:
         row = self.db.get(SessionRecord, session_id)
@@ -77,7 +83,7 @@ class SessionManager:
         # Clearing session-scoped permissions is the whole point of
         # invalidation -- an invalidated session must not leave any
         # grant reachable, even within the same running process.
-        PermissionStore(self.db).clear_session(session_id)
+        PermissionStore(self.db).clear_session(row.principal_id, session_id)
         logger.info("Session invalidated id=%s", session_id)
         return self._to_info(row)
 

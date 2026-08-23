@@ -103,10 +103,33 @@ def client(monkeypatch, tmp_path: Path):
     health_module._provider_health_cache["results"] = {}
 
     from fastapi.testclient import TestClient
+    from tests.test_phase4_api_security import _auth_headers
 
     from app.main import app
 
     with TestClient(app) as test_client:
+        original_post = test_client.post
+        original_get = test_client.get
+        original_patch = test_client.patch
+        
+        def authed_post(*args, **kwargs):
+            if len(args) > 0 and "api/emergency/activate" not in args[0] and "api/emergency/reset" not in args[0] and "headers" not in kwargs:
+                kwargs["headers"] = _auth_headers()
+            return original_post(*args, **kwargs)
+            
+        def authed_get(*args, **kwargs):
+            if "headers" not in kwargs:
+                kwargs["headers"] = _auth_headers()
+            return original_get(*args, **kwargs)
+            
+        def authed_patch(*args, **kwargs):
+            if "headers" not in kwargs:
+                kwargs["headers"] = _auth_headers()
+            return original_patch(*args, **kwargs)
+            
+        test_client.post = authed_post
+        test_client.get = authed_get
+        test_client.patch = authed_patch
         yield test_client
 
     get_settings.cache_clear()
@@ -729,6 +752,7 @@ def test_api_create_task_requires_auth(client) -> None:
     resp = client.post(
         "/api/tasks",
         json={"description": "no auth", "session_id": session_id},
+        headers={},
     )
     assert resp.status_code == 401
 

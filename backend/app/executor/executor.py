@@ -34,7 +34,7 @@ from app.permissions.models import PermissionScope, PermissionStatus
 from app.permissions.store import PermissionStore
 from app.safety.gate import SafetyGate
 from app.safety.models import GateAction, SafetyMode
-from app.tools.models import ConfirmationTier, DeviceType, RiskLevel, ToolDefinition
+from app.tools.models import ConfirmationTier, DeviceType, RiskLevel, ToolDefinition, PermissionCategory
 from app.tools.registry import ToolNotFoundError as RegistryToolNotFoundError
 from app.tools.registry import ToolRegistry
 
@@ -282,13 +282,17 @@ class ToolExecutor:
         # granted (session or persistent) before a tool in that category
         # may run at all. UNSET ("never asked") and DENIED ("explicitly
         # revoked") are both rejections here -- they're just different
-        # reasons, both visible in the audit log's permission_result.
-        permission_status = self.permission_store.check(
-            tool.permission_category,
-            session_id=session_id,
-            tool_name=tool.name,
-            device=target_device,
-        )
+        # Stage 3: permission check
+        if tool.permission_category is not None:
+            permission_status = self.permission_store.check(
+                principal_id,
+                tool.permission_category,
+                session_id=session_id,
+                tool_name=tool.name,
+                device=target_device,
+            )
+        else:
+            permission_status = PermissionStatus.GRANTED
         permission_result = permission_status.value
 
         if permission_status == PermissionStatus.DENIED:
@@ -337,6 +341,9 @@ class ToolExecutor:
         # --- Stage 5: confirmation if required ------------------------------
         if decision.action == GateAction.REQUIRE_CONFIRMATION:
             request = self.confirmation_broker.create(
+                principal_id=principal_id,
+                session_id=session_id,
+                task_id=task_id,
                 tool_name=tool.name,
                 target_device=target_device,
                 action=action_label,

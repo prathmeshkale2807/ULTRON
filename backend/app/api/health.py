@@ -158,3 +158,19 @@ async def health_check(db: Session = Depends(get_db)) -> HealthResponse:
         timestamp=datetime.now(timezone.utc).isoformat(),
         components=components,
     )
+
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+@router.get("/ready", tags=["System"])
+async def get_readiness(request: Request):
+    """
+    Phase 21: Dedicated readiness endpoint.
+    Returns 200 OK only if the backend has successfully completed its
+    startup lifecycle, including database migrations and required local init.
+    """
+    if getattr(request.app.state, "startup_complete", False):
+        return {"status": "ready"}
+    
+    return JSONResponse(status_code=503, content={"status": "starting", "detail": "Startup incomplete"})
+

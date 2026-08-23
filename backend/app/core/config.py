@@ -13,12 +13,29 @@ the service, talk to a local database, and answer a health check.
 
 from __future__ import annotations
 
+import os
+import sys
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+def get_default_data_dir() -> Path:
+    if getattr(sys, 'frozen', False):
+        appdata = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
+        return Path(appdata) / "ULTRON" / "data"
+    return Path("./data").resolve()
+
+def get_default_log_dir() -> str:
+    if getattr(sys, 'frozen', False):
+        appdata = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~\\AppData\\Local")
+        return str(Path(appdata) / "ULTRON" / "logs")
+    return "./data/logs"
+
+def get_default_db_url() -> str:
+    db_path = get_default_data_dir() / "ultron.db"
+    return f"sqlite:///{db_path}"
 
 class Settings(BaseSettings):
     """Strongly-typed application settings.
@@ -52,11 +69,11 @@ class Settings(BaseSettings):
     # --- Database -------------------------------------------------------
     # SQLite for Phase 1, per the approved architecture. The file lives
     # under the backend's local data directory, not inside source control.
-    database_url: str = Field(default="sqlite:///./data/ultron.db")
+    database_url: str = Field(default_factory=get_default_db_url)
 
-    # --- Logging ----------------------------------------------------------
-    log_level: str = Field(default="INFO")
-    log_dir: str = Field(default="./data/logs")
+    # --- Logging --------------------------------------------------------
+    log_level: str = Field(default="INFO")  # DEBUG | INFO | WARNING | ERROR
+    log_dir: str = Field(default_factory=get_default_log_dir)
 
     # --- AI providers (Phase 2) ---------------------------------------------
     # API keys: read from env/`.env` only, never hard-coded, never logged

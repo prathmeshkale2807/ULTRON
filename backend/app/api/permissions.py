@@ -1,4 +1,4 @@
-﻿"""
+"""
 Permission State API surface.
 
 Thin wrapper over PermissionStore -- grant / revoke / check, for both
@@ -57,10 +57,10 @@ class PermissionCheckResponse(BaseModel):
     status: PermissionStatus
 
 
-def _require_valid_session_if_scoped(body: PermissionRequest, db: Session) -> None:
+def _require_valid_session_if_scoped(body: PermissionRequest, db: Session, principal_id: str) -> None:
     if body.scope != PermissionScope.SESSION:
         return
-    if not body.session_id or not SessionManager(db).is_valid(body.session_id):
+    if not body.session_id or not SessionManager(db).is_valid(body.session_id, principal_id):
         raise HTTPException(status_code=400, detail="unknown, expired, or invalidated session_id")
 
 
@@ -71,9 +71,10 @@ def check_permission(
     tool_name: str | None = None,
     device: DeviceType | None = None,
     db: Session = Depends(get_db),
+    principal: Principal = Depends(require_local_auth),
 ) -> PermissionCheckResponse:
     store = PermissionStore(db)
-    status = store.check(category, session_id=session_id, tool_name=tool_name, device=device)
+    status = store.check(principal.identity, category, session_id=session_id, tool_name=tool_name, device=device)
     return PermissionCheckResponse(category=category, status=status)
 
 
@@ -83,12 +84,13 @@ def grant_permission(
     db: Session = Depends(get_db),
     principal: Principal = Depends(require_local_auth),
 ) -> dict:
-    _require_valid_session_if_scoped(body, db)
+    _require_valid_session_if_scoped(body, db, principal.identity)
     store = PermissionStore(db)
     old_status = store.check(
-        body.category, session_id=body.session_id, tool_name=body.tool_name, device=body.device
+        principal.identity, body.category, session_id=body.session_id, tool_name=body.tool_name, device=body.device
     )
     store.grant(
+        principal.identity,
         body.category,
         body.scope,
         session_id=body.session_id,
@@ -113,12 +115,13 @@ def revoke_permission(
     db: Session = Depends(get_db),
     principal: Principal = Depends(require_local_auth),
 ) -> dict:
-    _require_valid_session_if_scoped(body, db)
+    _require_valid_session_if_scoped(body, db, principal.identity)
     store = PermissionStore(db)
     old_status = store.check(
-        body.category, session_id=body.session_id, tool_name=body.tool_name, device=body.device
+        principal.identity, body.category, session_id=body.session_id, tool_name=body.tool_name, device=body.device
     )
     store.revoke(
+        principal.identity,
         body.category,
         body.scope,
         session_id=body.session_id,

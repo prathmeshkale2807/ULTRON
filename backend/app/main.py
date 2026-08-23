@@ -33,16 +33,31 @@ logger = get_logger("main")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import sys
     configure_logging()
     logger.info("ULTRON Core Service starting (environment=%s)", settings.environment)
-    if not schema_is_current():
-        logger.warning(
-            "Database schema is missing or out of date. Run 'alembic upgrade head' "
-            "in backend/ before relying on this service -- it will NOT create tables "
-            "for you (create_all() is not used as a migration mechanism)."
-        )
+    
+    settings.ensure_data_dirs()
+    
+    import os
+    if os.environ.get("ENVIRONMENT") != "test":
+        from app.core.database import run_migrations
+        try:
+            run_migrations()
+        except Exception as e:
+            logger.critical("Failed to migrate database: %s", e)
+            sys.exit(1)
+            
+        if not schema_is_current():
+            logger.critical("Database schema is still out of date after migration attempt. Failing closed.")
+            sys.exit(1)
+        else:
+            logger.info("Database schema up to date at %s", settings.database_url)
     else:
-        logger.info("Database schema up to date at %s", settings.database_url)
+        logger.info("Test environment detected, skipping automatic migrations.")
+
+    # Set readiness state globally (simple flag for the ready endpoint)
+    app.state.startup_complete = True
 
     # Register Windows Tools (Phase 6)
     from app.windows.tools import register_windows_tools

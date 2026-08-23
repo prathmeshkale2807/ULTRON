@@ -106,9 +106,9 @@ class TaskAuditResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _require_valid_session(session_id: str, db: Session) -> None:
+def _require_valid_session(session_id: str, db: Session, principal_id: str) -> None:
     """Raise 400 if the session_id is unknown or expired."""
-    if not SessionManager(db).is_valid(session_id):
+    if not SessionManager(db).is_valid(session_id, principal_id):
         raise HTTPException(
             status_code=400,
             detail="unknown, expired, or invalidated session_id",
@@ -132,7 +132,7 @@ async def create_task(
     principal: Principal = Depends(require_local_auth),
 ) -> TaskResponse:
     """Create a new task in QUEUED state and submit it to the worker pool."""
-    _require_valid_session(body.session_id, db)
+    _require_valid_session(body.session_id, db, principal.identity)
     manager = TaskManager(db)
     row = manager.create(
         session_id=body.session_id,

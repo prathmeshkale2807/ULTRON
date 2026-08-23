@@ -169,7 +169,7 @@ def test_take_screenshot(mock_grab, tmp_path):
 @pytest.mark.asyncio
 async def test_tool_executor_rejects_arbitrary_shell(db_session):
     executor = ToolExecutor(registry=get_registry(), db=db_session)
-    executor.permission_store.grant(PermissionCategory.PC_PROCESS_CONTROL, PermissionScope.PERSISTENT)
+    executor.permission_store.grant("local", PermissionCategory.PC_PROCESS_CONTROL, PermissionScope.PERSISTENT)
     
     async def approve(req):
         executor.confirmation_broker.resolve(req.id, approved=True)
@@ -187,7 +187,7 @@ async def test_tool_executor_rejects_arbitrary_shell(db_session):
 async def test_screenshot_requires_confirmation(db_session):
     """Screenshots are ALWAYS_ASK, requiring human confirmation."""
     executor = ToolExecutor(registry=get_registry(), db=db_session)
-    executor.permission_store.grant(PermissionCategory.PC_SCREEN_CAPTURE, PermissionScope.PERSISTENT)
+    executor.permission_store.grant("local", PermissionCategory.PC_SCREEN_CAPTURE, PermissionScope.PERSISTENT)
     
     # Background execution without confirmation broker pre-approved should fail or timeout
     import app.executor.executor as exec_mod
@@ -201,7 +201,7 @@ async def test_screenshot_requires_confirmation(db_session):
 async def test_missing_permission_rejected(db_session):
     executor = ToolExecutor(registry=get_registry(), db=db_session)
     # Explicitly clear permission
-    executor.permission_store.revoke(PermissionCategory.PC_PROCESS_CONTROL, PermissionScope.PERSISTENT)
+    executor.permission_store.revoke('local', PermissionCategory.PC_PROCESS_CONTROL, PermissionScope.PERSISTENT)
     
     import app.executor.executor as exec_mod
     with pytest.raises(exec_mod.PermissionDeniedError):
@@ -212,7 +212,7 @@ async def test_missing_permission_rejected(db_session):
 @pytest.mark.asyncio
 async def test_audit_logging_windows(db_session):
     executor = ToolExecutor(registry=get_registry(), db=db_session)
-    executor.permission_store.grant(PermissionCategory.PC_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant("local", PermissionCategory.PC_READ, PermissionScope.PERSISTENT)
     
     async def approve(req):
         executor.confirmation_broker.resolve(req.id, approved=True)
@@ -245,7 +245,7 @@ async def test_wrong_device_rejected(db_session):
 @pytest.mark.asyncio
 async def test_verification_engine_close_app(db_session):
     executor = ToolExecutor(registry=get_registry(), db=db_session)
-    executor.permission_store.grant(PermissionCategory.PC_PROCESS_CONTROL, PermissionScope.PERSISTENT)
+    executor.permission_store.grant("local", PermissionCategory.PC_PROCESS_CONTROL, PermissionScope.PERSISTENT)
     
     async def approve(req):
         executor.confirmation_broker.resolve(req.id, approved=True)

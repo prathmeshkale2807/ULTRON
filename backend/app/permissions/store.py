@@ -55,6 +55,7 @@ class PermissionStore:
     # --- writes -------------------------------------------------------
     def grant(
         self,
+        principal_id: str,
         category: PermissionCategory,
         scope: PermissionScope,
         *,
@@ -62,10 +63,11 @@ class PermissionStore:
         tool_name: str | None = None,
         device: DeviceType | None = None,
     ) -> None:
-        self._set(category, True, scope, session_id, tool_name, device)
+        self._set(principal_id, category, True, scope, session_id, tool_name, device)
 
     def revoke(
         self,
+        principal_id: str,
         category: PermissionCategory,
         scope: PermissionScope,
         *,
@@ -76,10 +78,11 @@ class PermissionStore:
         """Explicit denial -- distinct from simply never having granted.
         A revoked permission is remembered as DENIED, not reset to
         UNSET, so a later check correctly reports "explicitly denied"."""
-        self._set(category, False, scope, session_id, tool_name, device)
+        self._set(principal_id, category, False, scope, session_id, tool_name, device)
 
     def _set(
         self,
+        principal_id: str,
         category: PermissionCategory,
         granted: bool,
         scope: PermissionScope,
@@ -94,6 +97,7 @@ class PermissionStore:
             bucket[_key(category, tool_name, device)] = granted
         else:
             record = PermissionRecord(
+                principal_id=principal_id,
                 category=category.value,
                 tool_name=tool_name,
                 device=device.value if device else None,
@@ -113,6 +117,7 @@ class PermissionStore:
     # --- reads ----------------------------------------------------------
     def check(
         self,
+        principal_id: str,
         category: PermissionCategory,
         *,
         session_id: str | None = None,
@@ -134,10 +139,11 @@ class PermissionStore:
                 if key in bucket:
                     return PermissionStatus.GRANTED if bucket[key] else PermissionStatus.DENIED
 
-        return self._check_persistent(category, tool_name, device)
+        return self._check_persistent(principal_id, category, tool_name, device)
 
     def _check_persistent(
         self,
+        principal_id: str,
         category: PermissionCategory,
         tool_name: str | None,
         device: DeviceType | None,
@@ -149,6 +155,7 @@ class PermissionStore:
         ):
             stmt = (
                 select(PermissionRecord)
+                .where(PermissionRecord.principal_id == principal_id)
                 .where(PermissionRecord.category == category.value)
                 .where(PermissionRecord.tool_name == candidate_tool)
                 .where(PermissionRecord.device == candidate_device)
@@ -160,5 +167,5 @@ class PermissionStore:
                 return PermissionStatus.GRANTED if row.granted else PermissionStatus.DENIED
         return PermissionStatus.UNSET
 
-    def clear_session(self, session_id: str) -> None:
+    def clear_session(self, principal_id: str, session_id: str) -> None:
         self._session_store.pop(session_id, None)

@@ -87,8 +87,8 @@ async def test_android_tool_execution(db_session: Session):
         registry.register(tool, replace=True)
         
     executor = ToolExecutor(db=db_session, registry=registry)
-    PermissionStore(db_session).grant(PermissionCategory.ANDROID_SMS_SEND, PermissionScope.SESSION, session_id="test_user_1_session")
-    PermissionStore(db_session).grant(PermissionCategory.ANDROID_LOCATION_READ, PermissionScope.SESSION, session_id="test_user_1_session")
+    PermissionStore(db_session).grant("test_user_1", PermissionCategory.ANDROID_SMS_SEND, PermissionScope.SESSION, session_id="test_user_1_session")
+    PermissionStore(db_session).grant("test_user_1", PermissionCategory.ANDROID_LOCATION_READ, PermissionScope.SESSION, session_id="test_user_1_session")
     
     # 1. Target device mismatch (try to run Android tool with target=PC)
     with pytest.raises(DeviceValidationError):
@@ -160,7 +160,7 @@ async def test_android_permissions_and_emergency_stop(db_session: Session):
         )
         
     # 2. Grant SMS permission
-    PermissionStore(db_session).grant(PermissionCategory.ANDROID_SMS_SEND, PermissionScope.SESSION, session_id="test5_session")
+    PermissionStore(db_session).grant("test_user_1", PermissionCategory.ANDROID_SMS_SEND, PermissionScope.SESSION, session_id="test5_session")
     
     res = await executor.execute(
         "android_send_sms",

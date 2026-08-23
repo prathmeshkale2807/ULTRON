@@ -9,39 +9,39 @@ from app.tools.models import DeviceType, PermissionCategory
 
 def test_permission_defaults_to_unset(db_session) -> None:
     store = PermissionStore(db_session, session_store={})
-    status = store.check(PermissionCategory.FILE_WRITE)
+    status = store.check("local_user", PermissionCategory.FILE_WRITE)
     assert status == PermissionStatus.UNSET
 
 
 def test_persistent_grant_and_revoke(db_session) -> None:
     store = PermissionStore(db_session, session_store={})
 
-    store.grant(PermissionCategory.FILE_WRITE, PermissionScope.PERSISTENT)
-    assert store.check(PermissionCategory.FILE_WRITE) == PermissionStatus.GRANTED
+    store.grant("local_user", PermissionCategory.FILE_WRITE, PermissionScope.PERSISTENT)
+    assert store.check("local_user", PermissionCategory.FILE_WRITE) == PermissionStatus.GRANTED
 
-    store.revoke(PermissionCategory.FILE_WRITE, PermissionScope.PERSISTENT)
-    assert store.check(PermissionCategory.FILE_WRITE) == PermissionStatus.DENIED
+    store.revoke("local_user", PermissionCategory.FILE_WRITE, PermissionScope.PERSISTENT)
+    assert store.check("local_user", PermissionCategory.FILE_WRITE) == PermissionStatus.DENIED
 
 
 def test_session_permission_is_isolated_per_session(db_session) -> None:
     store = PermissionStore(db_session, session_store={})
 
     store.grant(
-        PermissionCategory.NETWORK, PermissionScope.SESSION, session_id="session-a"
+        "local_user", PermissionCategory.NETWORK, PermissionScope.SESSION, session_id="session-a"
     )
 
     assert (
-        store.check(PermissionCategory.NETWORK, session_id="session-a")
+        store.check("local_user", PermissionCategory.NETWORK, session_id="session-a")
         == PermissionStatus.GRANTED
     )
     # A different session never saw a grant -- and falls back to
     # persistent, which is also unset here.
     assert (
-        store.check(PermissionCategory.NETWORK, session_id="session-b")
+        store.check("local_user", PermissionCategory.NETWORK, session_id="session-b")
         == PermissionStatus.UNSET
     )
     # No session_id at all -- persistent-only lookup, still unset.
-    assert store.check(PermissionCategory.NETWORK) == PermissionStatus.UNSET
+    assert store.check("local_user", PermissionCategory.NETWORK) == PermissionStatus.UNSET
 
 
 def test_session_grant_does_not_persist_across_stores(db_session) -> None:
@@ -49,32 +49,32 @@ def test_session_grant_does_not_persist_across_stores(db_session) -> None:
     (simulating a process restart) must not remember it."""
     first_store = PermissionStore(db_session, session_store={})
     first_store.grant(
-        PermissionCategory.DEVICE_CONTROL, PermissionScope.SESSION, session_id="s1"
+        "local_user", PermissionCategory.DEVICE_CONTROL, PermissionScope.SESSION, session_id="s1"
     )
 
     second_store = PermissionStore(db_session, session_store={})
     assert (
-        second_store.check(PermissionCategory.DEVICE_CONTROL, session_id="s1")
+        second_store.check("local_user", PermissionCategory.DEVICE_CONTROL, session_id="s1")
         == PermissionStatus.UNSET
     )
 
 
 def test_session_grant_takes_priority_over_stale_persistent_denial(db_session) -> None:
     store = PermissionStore(db_session, session_store={})
-    store.revoke(PermissionCategory.BROWSER_NAVIGATE, PermissionScope.PERSISTENT)
+    store.revoke("local_user", PermissionCategory.BROWSER_NAVIGATE, PermissionScope.PERSISTENT)
     store.grant(
-        PermissionCategory.BROWSER_NAVIGATE, PermissionScope.SESSION, session_id="s1"
+        "local_user", PermissionCategory.BROWSER_NAVIGATE, PermissionScope.SESSION, session_id="s1"
     )
 
     assert (
-        store.check(PermissionCategory.BROWSER_NAVIGATE, session_id="s1") == PermissionStatus.GRANTED
+        store.check("local_user", PermissionCategory.BROWSER_NAVIGATE, session_id="s1") == PermissionStatus.GRANTED
     )
 
 
 def test_tool_and_device_scoped_grant_does_not_leak_to_other_tools(db_session) -> None:
     store = PermissionStore(db_session, session_store={})
     store.grant(
-        PermissionCategory.FILE_WRITE,
+        "local_user", PermissionCategory.FILE_WRITE,
         PermissionScope.PERSISTENT,
         tool_name="pc.write_file",
         device=DeviceType.PC,
@@ -82,14 +82,14 @@ def test_tool_and_device_scoped_grant_does_not_leak_to_other_tools(db_session) -
 
     assert (
         store.check(
-            PermissionCategory.FILE_WRITE, tool_name="pc.write_file", device=DeviceType.PC
+            "local_user", PermissionCategory.FILE_WRITE, tool_name="pc.write_file", device=DeviceType.PC
         )
         == PermissionStatus.GRANTED
     )
     # A different tool in the same category was never granted anything.
     assert (
         store.check(
-            PermissionCategory.FILE_WRITE, tool_name="android.write_file", device=DeviceType.PC
+            "local_user", PermissionCategory.FILE_WRITE, tool_name="android.write_file", device=DeviceType.PC
         )
         == PermissionStatus.UNSET
     )

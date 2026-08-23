@@ -38,8 +38,14 @@ def validate_url_safe(url: str) -> str:
                 if ip.is_private or ip.is_loopback or ip.is_link_local:
                     raise BrowserSafetyError(f"Private/local network access is strictly forbidden by policy: {hostname}")
             except ValueError:
-                # Not an IP literal, could still resolve to local but we block obvious ones
-                pass
+                import socket
+                try:
+                    resolved_ip = socket.gethostbyname(hostname)
+                    ip = ipaddress.ip_address(resolved_ip)
+                    if ip.is_private or ip.is_loopback or ip.is_link_local:
+                        raise BrowserSafetyError(f"Private/local network access is strictly forbidden by policy: {hostname} resolved to {resolved_ip}")
+                except socket.gaierror:
+                    raise BrowserSafetyError(f"Could not resolve hostname: {hostname}")
 
     return url
 

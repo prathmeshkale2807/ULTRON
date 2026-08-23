@@ -73,6 +73,7 @@ class PermissionRecord(Base):
     __tablename__ = "permission_records"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)
     category: Mapped[str] = mapped_column(String(64), index=True)
     # Optional narrowing: a persistent grant/denial can be scoped to one
     # tool name and/or one device type; NULL means "the whole category".
@@ -152,6 +153,7 @@ class SessionRecord(Base):
     __tablename__ = "sessions"
 
     session_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=lambda: datetime.now(timezone.utc)
     )
@@ -355,8 +357,17 @@ def schema_is_current() -> bool:
     from alembic.script import ScriptDirectory
     from sqlalchemy import inspect
 
-    backend_dir = Path(__file__).resolve().parents[2]
+    # Adjust path lookup to work when frozen by PyInstaller
+    import sys
+    if getattr(sys, 'frozen', False):
+        backend_dir = Path(sys._MEIPASS)
+    else:
+        backend_dir = Path(__file__).resolve().parents[2]
+
     alembic_cfg = Config(str(backend_dir / "alembic.ini"))
+    # In PyInstaller, we must explicitly point to the alembic directory inside _MEIPASS
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+    
     script = ScriptDirectory.from_config(alembic_cfg)
     head_revision = script.get_current_head()
 
@@ -369,6 +380,57 @@ def schema_is_current() -> bool:
     current_revision = row[0] if row else None
 
     return current_revision == head_revision
+
+
+def run_migrations() -> None:
+    """Runs 'alembic upgrade head' safely, failing closed on error."""
+    import sys
+    import os
+    if os.name != 'nt':
+        import fcntl
+    from alembic import command
+    from alembic.config import Config
+
+    if getattr(sys, 'frozen', False):
+        backend_dir = Path(sys._MEIPASS)
+    else:
+        backend_dir = Path(__file__).resolve().parents[2]
+        
+    alembic_cfg = Config(str(backend_dir / "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", str(backend_dir / "alembic"))
+    
+    # Alembic relies on sqlalchemy.url from ini, but we want our dynamic DB URL.
+    # Override it explicitly.
+    from app.core.config import get_settings
+    alembic_cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
+
+    # Simple file lock to prevent concurrent migrations during parallel startup
+    lock_path = get_settings().data_dir / "migration.lock"
+    
+    try:
+        lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR)
+        if os.name == 'nt':
+            import msvcrt
+            # Lock the first byte exclusively (fails immediately if locked by another process)
+            msvcrt.locking(lock_fd, msvcrt.LK_NBLCK, 1)
+        else:
+            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except Exception as e:
+        raise RuntimeError(f"Could not acquire migration lock at {lock_path}: {e}")
+        
+    try:
+        command.upgrade(alembic_cfg, "head")
+    finally:
+        if os.name == 'nt':
+            import msvcrt
+            msvcrt.locking(lock_fd, msvcrt.LK_UNLCK, 1)
+        else:
+            fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        os.close(lock_fd)
+        try:
+            os.remove(lock_path)
+        except OSError:
+            pass
 
 
 def create_all_for_tests(bind=None) -> None:

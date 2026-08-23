@@ -103,17 +103,19 @@ def test_persisted_custom_override_still_cannot_bypass_critical_floor(db_session
 
 def test_session_create_and_is_valid(db_session) -> None:
     manager = SessionManager(db_session)
-    info = manager.create()
-    assert info.valid is True
+    info = manager.create("local_user")
+
     assert manager.is_valid(info.session_id) is True
+    assert manager.is_valid("nonexistent-session") is False
 
 
 def test_session_expires(db_session) -> None:
     manager = SessionManager(db_session)
-    info = manager.create(ttl_seconds=0.01)
-    time.sleep(0.05)
+    info = manager.create("local_user", ttl_seconds=0.1)
+    
+    assert manager.is_valid(info.session_id) is True
+    time.sleep(0.2)
     assert manager.is_valid(info.session_id) is False
-    assert manager.get(info.session_id).valid is False
 
 
 def test_session_invalidation_clears_session_permissions(db_session) -> None:
@@ -125,16 +127,16 @@ def test_session_invalidation_clears_session_permissions(db_session) -> None:
     # also uses, so invalidation is exercised end-to-end for real.
     store = PermissionStore(db_session)
     manager = SessionManager(db_session)
-    info = manager.create()
+    info = manager.create("local_user")
 
-    store.grant(PermissionCategory.NETWORK, PermissionScope.SESSION, session_id=info.session_id)
-    assert store.check(PermissionCategory.NETWORK, session_id=info.session_id) == (
+    store.grant("local_user", PermissionCategory.NETWORK, PermissionScope.SESSION, session_id=info.session_id)
+    assert store.check("local_user", PermissionCategory.NETWORK, session_id=info.session_id) == (
         PermissionStatus.GRANTED
     )
 
     manager.invalidate(info.session_id)
 
-    assert store.check(PermissionCategory.NETWORK, session_id=info.session_id) == (
+    assert store.check("local_user", PermissionCategory.NETWORK, session_id=info.session_id) == (
         PermissionStatus.UNSET
     )
     assert manager.is_valid(info.session_id) is False

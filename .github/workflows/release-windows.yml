@@ -1,0 +1,78 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: apps/desktop/package-lock.json
+          
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+          
+      - name: Build PyInstaller Backend
+        working-directory: backend
+        run: python build_windows.py
+        
+      - name: Install frontend dependencies
+        working-directory: apps/desktop
+        run: npm ci
+        
+      # Placeholder for Windows Code Signing using GitHub Secrets
+      # - name: Sign backend binary
+      #   run: |
+      #     # Import certificate from ${{ secrets.WINDOWS_SIGNING_CERT }}
+      #     # Sign apps/desktop/src-tauri/bin/ultron-backend-x86_64-pc-windows-msvc.exe
+          
+      - name: Build Tauri App
+        working-directory: apps/desktop
+        run: npm run tauri build
+        
+      # - name: Sign MSI installer
+      #   run: |
+      #     # Sign apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+          
+      - name: Verify Secret Exclusion
+        run: |
+          if (Test-Path "backend/.env") { exit 1 }
+          if (Test-Path "backend/data/ultron.db") { exit 1 }
+        
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ultron-windows-msi
+          path: apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+          
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/desktop/src-tauri/target/release/bundle/msi/*.msi
+          generate_release_notes: true

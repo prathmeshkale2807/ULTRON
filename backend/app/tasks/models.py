@@ -52,6 +52,7 @@ class TaskState(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    NEEDS_RECONCILIATION = "needs_reconciliation"
 
 
 class TaskPriority(str, Enum):
@@ -71,7 +72,7 @@ PRIORITY_WEIGHT: dict[TaskPriority, int] = {
 
 # Terminal states — no transitions out.
 TERMINAL_STATES: frozenset[TaskState] = frozenset(
-    {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED}
+    {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED, TaskState.NEEDS_RECONCILIATION}
 )
 
 # Allowed transitions: source → set of legal targets.
@@ -83,6 +84,7 @@ VALID_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.RUNNING,
             TaskState.FAILED,
             TaskState.CANCELLED,
+            TaskState.NEEDS_RECONCILIATION,
         }
     ),
     TaskState.WAITING_FOR_PERMISSION: frozenset(
@@ -95,16 +97,18 @@ VALID_TRANSITIONS: dict[TaskState, frozenset[TaskState]] = {
             TaskState.COMPLETED,
             TaskState.FAILED,
             TaskState.CANCELLED,
+            TaskState.NEEDS_RECONCILIATION,
         }
     ),
     TaskState.PAUSED: frozenset({TaskState.RUNNING, TaskState.CANCELLED, TaskState.FAILED}),
     TaskState.VERIFYING: frozenset(
-        {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED}
+        {TaskState.COMPLETED, TaskState.FAILED, TaskState.CANCELLED, TaskState.NEEDS_RECONCILIATION}
     ),
     # Terminal — empty sets, but keep them in the dict for exhaustive lookup.
     TaskState.COMPLETED: frozenset(),
     TaskState.FAILED: frozenset(),
     TaskState.CANCELLED: frozenset(),
+    TaskState.NEEDS_RECONCILIATION: frozenset(),
 }
 
 

@@ -42,6 +42,9 @@ class ConfirmationStatus(str, Enum):
 
 class ConfirmationRequest(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    principal_id: str
+    session_id: str | None = None
+    task_id: str | None = None
     tool_name: str
     target_device: DeviceType
     action: str
@@ -62,6 +65,9 @@ class ConfirmationBroker:
     def create(
         self,
         *,
+        principal_id: str,
+        session_id: str | None = None,
+        task_id: str | None = None,
         tool_name: str,
         target_device: DeviceType,
         action: str,
@@ -70,6 +76,9 @@ class ConfirmationBroker:
         risk: RiskLevel,
     ) -> ConfirmationRequest:
         request = ConfirmationRequest(
+            principal_id=principal_id,
+            session_id=session_id,
+            task_id=task_id,
             tool_name=tool_name,
             target_device=target_device,
             action=action,

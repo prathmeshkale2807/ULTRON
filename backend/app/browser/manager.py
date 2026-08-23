@@ -73,13 +73,24 @@ class BrowserManager:
                     # Validate URL. If it fails, route.abort() will block it.
                     validate_url_safe(request.url)
                     
-                    if request.resource_type in ["fetch", "xhr", "document"]:
-                        pass
+                    # Prevent redirect bypasses by fetching the request manually
+                    # without following redirects, then validating the Location header.
+                    response = await route.fetch(max_redirects=0)
                     
-                    await route.continue_()
+                    if response.status in (301, 302, 303, 307, 308):
+                        location = response.headers.get("location")
+                        if location:
+                            from urllib.parse import urljoin
+                            absolute_location = urljoin(request.url, location)
+                            validate_url_safe(absolute_location)
+                            
+                    await route.fulfill(response=response)
                 except BrowserSafetyError as e:
                     logger.warning(f"Blocked unsafe navigation/resource request: {request.url} - {e}")
                     await route.abort(error_code="accessdenied")
+                except Exception as e:
+                    logger.error(f"Error handling route {request.url}: {e}")
+                    await route.abort(error_code="aborted")
 
             await context.route("**/*", route_handler)
             self._contexts[session_id] = context

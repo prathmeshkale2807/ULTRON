@@ -274,7 +274,7 @@ async def test_execute_rejects_missing_permission(db_session) -> None:
 async def test_execute_rejects_denied_permission(db_session) -> None:
     registry, executor = make_executor(db_session)
     registry.register(make_tool())
-    executor.permission_store.revoke(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.revoke('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     with pytest.raises(PermissionDeniedError):
         await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
@@ -290,7 +290,7 @@ async def test_execute_rejects_denied_permission(db_session) -> None:
 async def test_execute_succeeds_after_confirmation_approved(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.SAFE)
     registry.register(make_tool())
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
         confirmation_callback=lambda req: True,
@@ -306,7 +306,7 @@ async def test_execute_succeeds_after_confirmation_approved(db_session) -> None:
 async def test_execute_raises_when_confirmation_denied(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.SAFE)
     registry.register(make_tool())
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     with pytest.raises(ConfirmationDeniedError):
         await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
@@ -321,7 +321,7 @@ async def test_execute_raises_when_confirmation_denied(db_session) -> None:
 async def test_execute_raises_when_confirmation_times_out(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.SAFE)
     registry.register(make_tool())
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     with pytest.raises(ConfirmationTimeoutError):
         await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
@@ -339,7 +339,7 @@ async def test_ask_once_per_session_skips_confirmation_on_second_call(db_session
         db_session, mode=SafetyMode.BALANCED, session_confirmations=session_confirmations
     )
     registry.register(make_tool(confirmation_tier=ConfirmationTier.ASK_ONCE_PER_SESSION))
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     first = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local",
         session_id="s1",
@@ -365,7 +365,7 @@ async def test_always_ask_cannot_be_bypassed_across_repeated_calls(db_session) -
         db_session, mode=SafetyMode.BALANCED, session_confirmations=session_confirmations
     )
     registry.register(make_tool(confirmation_tier=ConfirmationTier.ALWAYS_ASK))
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     call_count = {"n": 0}
 
@@ -391,7 +391,7 @@ async def test_trusted_mode_cannot_bypass_always_ask(db_session) -> None:
         db_session, mode=SafetyMode.TRUSTED, session_confirmations=session_confirmations
     )
     registry.register(make_tool(confirmation_tier=ConfirmationTier.ALWAYS_ASK))
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     call_count = {"n": 0}
 
@@ -415,7 +415,7 @@ async def test_trusted_mode_cannot_bypass_always_ask(db_session) -> None:
     # auto-approving everything else, and the ALWAYS_ASK case above is a
     # real floor rather than Trusted Mode just always asking anyway.
     registry.register(make_tool(name="mock.echo.auto", confirmation_tier=ConfirmationTier.AUTOMATIC))
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
     auto_result = await executor.execute("mock.echo.auto", {"path": "x"}, target_device=DeviceType.PC, principal_id="local"
     )
     assert auto_result.success is True
@@ -425,7 +425,7 @@ async def test_session_permission_grant_is_scoped_to_its_session(db_session) -> 
     registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
     registry.register(make_tool())
     executor.permission_store.grant(
-        PermissionCategory.FILE_READ, PermissionScope.SESSION, session_id="granted-session"
+        "local", PermissionCategory.FILE_READ, PermissionScope.SESSION, session_id="granted-session"
     )
 
     ok = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local", session_id="granted-session"
@@ -444,7 +444,7 @@ async def test_session_permission_grant_is_scoped_to_its_session(db_session) -> 
 async def test_tool_execution_timeout_is_enforced(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
     registry.register(make_tool(handler=slow_handler, timeout_seconds=0.05))
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     with pytest.raises(ToolTimeoutError):
         await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
@@ -455,7 +455,7 @@ async def test_tool_execution_timeout_is_enforced(db_session) -> None:
 async def test_handler_error_without_retry_returns_failure_result(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
     registry.register(make_tool(handler=failing_handler))
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
@@ -470,7 +470,7 @@ async def test_retry_policy_retries_then_succeeds(db_session) -> None:
     registry.register(
         make_tool(handler=flaky, retry_policy=RetryPolicy(max_attempts=3, backoff_seconds=0.0))
     )
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
@@ -493,7 +493,7 @@ async def test_verification_callback_marks_verified_or_failed(db_session) -> Non
             verifier=always_true_verifier,
         )
     )
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
@@ -506,7 +506,7 @@ async def test_verification_callback_marks_verified_or_failed(db_session) -> Non
 async def test_invalid_output_schema_is_rejected(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
     registry.register(make_tool(output_schema={"type": "object", "required": ["must_exist"]}))
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
@@ -527,7 +527,7 @@ async def test_failed_verification_is_not_reported_as_success(db_session) -> Non
             verifier=always_false_verifier,
         )
     )
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     result = await executor.execute("mock.echo", {"path": "x"}, target_device=DeviceType.PC, principal_id="local")
 
@@ -549,7 +549,7 @@ def test_audit_redacts_secret_like_strings() -> None:
 async def test_emergency_stop_blocks_new_tool_execution(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
     registry.register(make_tool())
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     stop = EmergencyStop(db_session)
     stop.activate(reason="test halt", activated_by="tester")
@@ -583,7 +583,7 @@ async def test_emergency_stop_status_reports_reason(db_session) -> None:
 async def test_audit_logging_records_full_pipeline(db_session) -> None:
     registry, executor = make_executor(db_session, mode=SafetyMode.TRUSTED)
     registry.register(make_tool())
-    executor.permission_store.grant(PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
+    executor.permission_store.grant('local', PermissionCategory.FILE_READ, PermissionScope.PERSISTENT)
 
     result = await executor.execute("mock.echo", {"path": "secret-plan.txt"}, target_device=DeviceType.PC, principal_id="local"
     )

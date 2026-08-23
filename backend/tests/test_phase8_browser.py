@@ -61,7 +61,8 @@ def test_wrap_untrusted_content():
 
 @pytest.mark.asyncio
 async def test_browser_lifecycle_and_isolation():
-    manager = get_browser_manager()
+    from app.browser.manager import BrowserManager
+    manager = BrowserManager()
     await manager.startup()
     
     try:
@@ -86,18 +87,87 @@ async def test_browser_lifecycle_and_isolation():
     finally:
         await manager.shutdown()
 
+import asyncio
+
 @pytest.mark.asyncio
-async def test_redirects_are_validated():
-    """Verify that a safe initial URL cannot redirect to an unsafe URL (e.g. file://)."""
+async def test_redirects_are_validated(monkeypatch):
+    """Verify that a safe initial URL cannot redirect to an unsafe URL (e.g. file:// or localhost)."""
+    from app.core.config import get_settings
+    settings = get_settings()
+    monkeypatch.setattr(settings, "allow_local_network_browser", False)
+
+    # Simple TCP server to act as a malicious redirector
+    redirect_target = "http://127.0.0.1"
+    async def handle_client(reader, writer):
+        data = await reader.read(1024)
+        response = f"HTTP/1.1 302 Found\r\nLocation: {redirect_target}\r\n\r\n".encode()
+        writer.write(response)
+        await writer.drain()
+        writer.close()
+
+    server = await asyncio.start_server(handle_client, '127.0.0.1', 0)
+    port = server.sockets[0].getsockname()[1]
+
+    # Temporarily allow our mock server port so the initial request passes validation
+    import app.browser.manager as manager_module
+    import app.browser.safety as safety
+    original_validate = safety.validate_url_safe
+    
+    def mock_validate(url):
+        if str(port) in url:
+            return url
+        return original_validate(url)
+    monkeypatch.setattr(manager_module, "validate_url_safe", mock_validate)
+
     manager = get_browser_manager()
     await manager.startup()
     try:
         ctx = await manager.get_or_create_context("test_redirects")
         page = await ctx.new_page()
-        # Playwright route handlers inherently apply to redirects according to Playwright docs.
-        pass
+        
+        # Test 1: Safe -> 127.0.0.1
+        redirect_target = "http://127.0.0.1"
+        with pytest.raises(Exception) as excinfo:
+            await page.goto(f"http://127.0.0.1:{port}", wait_until="networkidle", timeout=2000)
+        assert "accessdenied" in str(excinfo.value).lower() or "err_access_denied" in str(excinfo.value).lower()
+        
+        # Test 2: Safe -> localhost
+        redirect_target = "http://localhost:9999"
+        with pytest.raises(Exception) as excinfo:
+            await page.goto(f"http://127.0.0.1:{port}", wait_until="networkidle", timeout=2000)
+        assert "accessdenied" in str(excinfo.value).lower() or "err_access_denied" in str(excinfo.value).lower()
+        
+        # Test 3: Safe -> 169.254.169.254
+        redirect_target = "http://169.254.169.254"
+        with pytest.raises(Exception) as excinfo:
+            await page.goto(f"http://127.0.0.1:{port}", wait_until="networkidle", timeout=2000)
+        assert "accessdenied" in str(excinfo.value).lower() or "err_access_denied" in str(excinfo.value).lower()
+
+        # Test 4: Safe -> RFC1918 (10.0.0.1)
+        redirect_target = "http://10.0.0.1"
+        with pytest.raises(Exception) as excinfo:
+            await page.goto(f"http://127.0.0.1:{port}", wait_until="networkidle", timeout=2000)
+        assert "accessdenied" in str(excinfo.value).lower() or "err_access_denied" in str(excinfo.value).lower()
+
+        # Test 5: Safe -> localtest.me (resolves to 127.0.0.1)
+        redirect_target = "http://localtest.me"
+        with pytest.raises(Exception) as excinfo:
+            await page.goto(f"http://127.0.0.1:{port}", wait_until="networkidle", timeout=2000)
+        assert "accessdenied" in str(excinfo.value).lower() or "err_access_denied" in str(excinfo.value).lower()
+
+        # Test 6: Safe -> public safe (google.com) - this should NOT raise access denied
+        # It may timeout or fail due to network, but it shouldn't be blocked by policy.
+        # However, because of our monkeypatch, google.com will be validated by original_validate.
+        redirect_target = "https://google.com"
+        try:
+            await page.goto(f"http://127.0.0.1:{port}", wait_until="domcontentloaded", timeout=5000)
+        except Exception as e:
+            assert "accessdenied" not in str(e).lower() and "err_access_denied" not in str(e).lower()
+
     finally:
         await manager.shutdown()
+        server.close()
+        await server.wait_closed()
 
 @pytest.mark.asyncio
 async def test_tools_return_structured_untrusted_data():

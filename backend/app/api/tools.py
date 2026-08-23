@@ -10,10 +10,11 @@ ever serializes ToolDefinition.public_metadata(), which excludes
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 from app.tools.registry import ToolNotFoundError, get_registry
+from app.security.local_auth import Principal, require_local_auth
 
 router = APIRouter(prefix="/tools")
 
@@ -23,13 +24,16 @@ class SetEnabledRequest(BaseModel):
 
 
 @router.get("")
-def list_tools(enabled_only: bool = False) -> list[dict]:
+def list_tools(
+    enabled_only: bool = False,
+    principal: Principal = Depends(require_local_auth)
+) -> list[dict]:
     registry = get_registry()
     return [t.public_metadata() for t in registry.list_tools(enabled_only=enabled_only)]
 
 
 @router.get("/{name}")
-def get_tool(name: str) -> dict:
+def get_tool(name: str, principal: Principal = Depends(require_local_auth)) -> dict:
     registry = get_registry()
     try:
         return registry.get(name).public_metadata()
@@ -38,7 +42,11 @@ def get_tool(name: str) -> dict:
 
 
 @router.post("/{name}/enabled")
-def set_tool_enabled(name: str, body: SetEnabledRequest) -> dict:
+def set_tool_enabled(
+    name: str, 
+    body: SetEnabledRequest,
+    principal: Principal = Depends(require_local_auth)
+) -> dict:
     registry = get_registry()
     try:
         tool = registry.set_enabled(name, body.enabled)

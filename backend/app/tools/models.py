@@ -209,6 +209,7 @@ class ToolDefinition(BaseModel):
     timeout_seconds: float = Field(default=30.0, gt=0.0, le=600.0)
     retry_policy: RetryPolicy = Field(default_factory=RetryPolicy)
     verification_method: VerificationMethod = Field(default=VerificationMethod.NONE)
+    is_idempotent: bool = Field(default=False)
 
     enabled: bool = Field(default=True)
 
