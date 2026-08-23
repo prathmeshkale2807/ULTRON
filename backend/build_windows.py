@@ -18,13 +18,14 @@ def build_backend():
         f.write("import uvicorn\n")
         f.write("from app.main import app\n")
         f.write("if __name__ == '__main__':\n")
-        f.write("    uvicorn.run('app.main:app', host='127.0.0.1', port=8756)\n")
+        f.write("    uvicorn.run(app, host='127.0.0.1', port=8756)\n")
 
     import sys
     cmd = [
         sys.executable, "-m", "PyInstaller",
         "--name", "ultron-backend",
         "--onefile",
+        "--collect-all", "app",
         "--add-data", f"alembic;alembic",
         "--add-data", f"alembic.ini;.",
         "--hidden-import", "app.api.automations",

@@ -55,18 +55,21 @@ class SchedulerEngine:
             self._recover_stale_claims(db)
             
             # 2. Check Emergency Stop
-            from app.safety.manager import is_emergency_stop_engaged
-            is_stopped = is_emergency_stop_engaged()
+            from app.emergency.stop import EmergencyStop
+            is_stopped = EmergencyStop(db).is_engaged()
             
             # 3. Generate new runs for due automations
             self._generate_due_runs(db)
             
-            if not is_stopped:
-                # 4. Handle misfires
-                self._handle_misfires(db)
-                
-                # 5. Claim and submit runs
-                self._claim_and_submit_runs(db)
+            if is_stopped:
+                logger.warning("Emergency Stop engaged - scheduler skipping execution")
+                return
+            
+            # 4. Handle misfires
+            self._handle_misfires(db)
+            
+            # 5. Claim and submit runs
+            self._claim_and_submit_runs(db)
 
     def _recover_stale_claims(self, db: Session):
         now = datetime.now(timezone.utc)
