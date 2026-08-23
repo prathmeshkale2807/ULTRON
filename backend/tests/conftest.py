@@ -18,13 +18,15 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import app.automations.models
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 
 @pytest.fixture()
 def db_session(tmp_path: Path):
-    from app.core.database import Base  # import here, after any env setup
+    from app.core.database import Base
+    import app.automations.models  # import here, after any env setup
 
     db_file = tmp_path / f"phase3_test_{id(tmp_path)}.db"
     engine = create_engine(f"sqlite:///{db_file}", connect_args={"check_same_thread": False})

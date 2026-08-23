@@ -62,6 +62,16 @@ async def lifespan(app: FastAPI):
     for tool in ANDROID_TOOLS:
         get_registry().register(tool, replace=True)
 
+    # Register Automations Tool (Phase 17)
+    from app.automations.tools import AUTOMATION_TOOLS
+    for tool in AUTOMATION_TOOLS:
+        get_registry().register(tool, replace=True)
+
+    # Start the automations scheduler (Phase 17)
+    from app.automations.scheduler import scheduler_engine
+    scheduler_engine.start()
+    logger.info("Scheduler engine started")
+
     # Start the task worker pool (Phase 5).
     from app.tasks.worker import get_task_worker
 
@@ -72,6 +82,9 @@ async def lifespan(app: FastAPI):
     yield
 
     # Graceful shutdown: stop accepting new tasks and drain.
+    await scheduler_engine.stop()
+    logger.info("Scheduler engine stopped")
+    
     await worker.stop()
     from app.tasks.worker import reset_task_worker
     reset_task_worker()

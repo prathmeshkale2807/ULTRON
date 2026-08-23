@@ -60,19 +60,17 @@ def test_schema_is_current_reflects_real_migration_state(monkeypatch, temp_db_ur
 
     get_settings.cache_clear()
 
-    # Re-import database module against the patched settings/engine.
-    import importlib
-
     import app.core.database as database_module
-
-    importlib.reload(database_module)
+    from sqlalchemy import create_engine
+    
+    test_engine = create_engine(temp_db_url)
+    monkeypatch.setattr(database_module, "engine", test_engine)
 
     assert database_module.schema_is_current() is False
 
     cfg = _alembic_config(temp_db_url)
     command.upgrade(cfg, "head")
 
-    importlib.reload(database_module)
     assert database_module.schema_is_current() is True
 
     get_settings.cache_clear()

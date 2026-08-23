@@ -64,6 +64,10 @@ class PermissionCategory(str, Enum):
     CALENDAR_CREATE = "calendar_create"
     CALENDAR_MODIFY = "calendar_modify"
     CALENDAR_CANCEL = "calendar_cancel"
+
+    # Phase 17: Automations
+    SCHEDULING = "scheduling"
+
     BROWSER_INTERACT = "browser_interact"
     BROWSER_SENSITIVE_INPUT = "browser_sensitive_input"
     BROWSER_SCREENSHOT = "browser_screenshot"

@@ -341,6 +341,8 @@ class DeviceRecord(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+# Import specific models to ensure Base metadata contains them for Alembic
+
 
 def schema_is_current() -> bool:
     """True if the DB is migrated to the latest Alembic revision.

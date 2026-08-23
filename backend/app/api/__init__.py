@@ -18,3 +18,6 @@ api_router.include_router(memory.router, tags=["memory"])
 
 from app.api import voice
 api_router.include_router(voice.router, tags=['voice'])
+
+from app.api import automations
+api_router.include_router(automations.router, prefix="/automations", tags=["automations"])
