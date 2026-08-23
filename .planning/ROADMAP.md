@@ -76,12 +76,12 @@ Completed phases are frozen baselines. Future phases must preserve prior securit
 
 ### Phase 11: Device Manager + Android Companion
 **Status**: SHIPPED
-**Goal**: Security and stability audits across the core orchestrator and tools.
+**Goal**: Secure Android device pairing, per-principal device ownership, authenticated heartbeats, device lifecycle management, and the backend foundation for the Android companion.
 **Test Baseline**: N/A
 
 ### Phase 12: Basic Android Control + WebSocket Transport
 **Status**: SHIPPED
-**Goal**: Secure Android device pairing, authentication, and WebSocket transport layer.
+**Goal**: Real Android companion interaction through an authenticated WebSocket transport, including basic device status, location, SMS, app opening, and volume control with verification and safety enforcement.
 **Test Baseline**: N/A
 
 ### Phase 13: Voice Engine
@@ -101,7 +101,7 @@ Completed phases are frozen baselines. Future phases must preserve prior securit
 
 ### Phase 16: Advanced Android Automation
 **Status**: SHIPPED
-**Goal**: Background scheduled execution of tasks via CRON jobs.
+**Goal**: Controlled Android automation capabilities including notification access, allowlisted intents, media control, brightness/settings control, app discovery, battery information, request correlation, cancellation, and read-back verification.
 **Test Baseline**: N/A
 
 ### Phase 17: Automations + Scheduler
