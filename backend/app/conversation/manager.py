@@ -217,20 +217,27 @@ class ConversationManager:
             exec_results = ""
             visual_context = []
             
+            from app.tasks.manager import _volatile_tool_results
+            volatile_results = _volatile_tool_results.pop(task.task_id, [])
+            
             import base64
             for e in history_entries:
                 try:
                     detail_data = json.loads(e.detail)
-                    if "image_base64_secret" in detail_data:
-                        b64 = detail_data.pop("image_base64_secret")
-                        try:
-                            decoded = base64.b64decode(b64)
-                            visual_context.append(ContentPart(type="image", mime_type="image/png", data=decoded))
-                        except Exception:
-                            pass
                     exec_results += f"{e.event}: {json.dumps(detail_data)}\n"
                 except Exception:
                     exec_results += f"{e.event}: {e.detail}\n"
+                    
+            for res in volatile_results:
+                out = res.get("output", {})
+                if isinstance(out, dict) and "image_base64_secret" in out:
+                    b64 = out.pop("image_base64_secret")
+                    try:
+                        decoded = base64.b64decode(b64)
+                        visual_context.append(ContentPart(type="image", mime_type="image/png", data=decoded))
+                    except Exception:
+                        pass
+                exec_results += f"Tool {res.get('tool_name')} result: {json.dumps(out)}\n"
                     
             if not exec_results.strip():
                 exec_results = f"Task finished with state: {task.state}"

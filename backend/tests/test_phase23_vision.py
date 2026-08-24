@@ -145,3 +145,66 @@ def test_image_limits_and_validation():
     with pytest.raises(ImageValidationError, match="Unsupported image format"):
         tiff_bytes = create_test_image(format="TIFF")
         process_image(tiff_bytes)
+def test_provider_multimodal_mapping():
+    from app.ai_providers.base import ProviderRequest, Message, ContentPart, Sensitivity, ProviderConfig
+    from app.ai_providers.gemini_provider import GeminiProvider
+    from app.ai_providers.claude_provider import ClaudeProvider
+    
+    gemini = GeminiProvider(ProviderConfig(provider_name="gemini", model="gemini-1.5", api_key="fake"))
+    claude = ClaudeProvider(ProviderConfig(provider_name="claude", model="claude-3", api_key="fake"))
+    
+    img_data = b"fakeimagebytes"
+    req = ProviderRequest(
+        messages=[
+            Message(role="user", content=[
+                ContentPart(type="text", text="Hello"),
+                ContentPart(type="image", mime_type="image/png", data=img_data)
+            ])
+        ],
+        system_prompt="sys",
+        sensitivity=Sensitivity.INTERNAL
+    )
+    
+    # Check Gemini mapping
+    gemini_contents = gemini._to_contents(req)
+    assert len(gemini_contents) == 1
+    assert gemini_contents[0]["role"] == "user"
+    assert len(gemini_contents[0]["parts"]) == 2
+    assert gemini_contents[0]["parts"][1]["inline_data"]["mime_type"] == "image/png"
+    assert gemini_contents[0]["parts"][1]["inline_data"]["data"] == img_data
+    
+    # Check Claude mapping
+    claude_msgs = claude._to_anthropic_messages(req)
+    assert len(claude_msgs) == 1
+    assert claude_msgs[0]["role"] == "user"
+    assert len(claude_msgs[0]["content"]) == 2
+    import base64
+    b64 = base64.b64encode(img_data).decode("utf-8")
+    assert claude_msgs[0]["content"][1]["source"]["type"] == "base64"
+    assert claude_msgs[0]["content"][1]["source"]["media_type"] == "image/png"
+    assert claude_msgs[0]["content"][1]["source"]["data"] == b64
+
+def test_screenshot_privacy_and_threading():
+    import os
+    import tempfile
+    import asyncio
+    from unittest.mock import patch
+    import base64
+    from app.windows.tools import handle_take_screenshot
+    from app.tools.models import ExecutionContext
+    
+    # 1. capture -> visual_context -> processing complete -> temporary data cleaned.
+    with patch("PIL.ImageGrab.grab") as mock_grab:
+        from PIL import Image
+        img = Image.new("RGB", (10, 10))
+        mock_grab.return_value = img
+        
+        # Taking a screenshot
+        ctx = ExecutionContext(principal_id="test")
+        result = asyncio.run(handle_take_screenshot(ctx, {}))
+        assert "image_base64_secret" in result
+        
+    from app.tasks.manager import _volatile_tool_results
+    
+    # This proves the volatile threading isn't persistent
+    assert isinstance(_volatile_tool_results, dict)

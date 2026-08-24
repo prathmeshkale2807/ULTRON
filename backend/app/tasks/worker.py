@@ -271,6 +271,13 @@ async def _execute_task(task_id: str, *, session_factory: SessionFactory) -> Non
                         actor="worker"
                     )
                     return
+                else:
+                    if task_id not in mgr_module._volatile_tool_results:
+                        mgr_module._volatile_tool_results[task_id] = []
+                    mgr_module._volatile_tool_results[task_id].append({
+                        "tool_name": tool_name,
+                        "output": result.output
+                    })
 
             # All steps done
             manager.transition_state(task_id, TaskState.VERIFYING, actor="worker")

@@ -390,3 +390,5 @@ def register_pause_resume_events(task_id: str) -> tuple[asyncio.Event, asyncio.E
     _pause_events[task_id] = pe
     _resume_events[task_id] = re
     return pe, re
+
+_volatile_tool_results: dict[str, list[dict]] = {}
