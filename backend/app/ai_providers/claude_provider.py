@@ -43,7 +43,31 @@ class ClaudeProvider(AIProvider):
         return self._client
 
     def _to_anthropic_messages(self, request: ProviderRequest) -> list[dict]:
-        return [{"role": m.role, "content": m.content} for m in request.messages if m.role != "system"]
+        import base64
+        msgs = []
+        for m in request.messages:
+            if m.role == "system":
+                continue
+                
+            if isinstance(m.content, str):
+                msgs.append({"role": m.role, "content": m.content})
+            else:
+                parts = []
+                for cp in m.content:
+                    if cp.type == "text":
+                        parts.append({"type": "text", "text": cp.text})
+                    elif cp.type == "image":
+                        b64 = base64.b64encode(cp.data).decode("utf-8")
+                        parts.append({
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": cp.mime_type,
+                                "data": b64
+                            }
+                        })
+                msgs.append({"role": m.role, "content": parts})
+        return msgs
 
     def _to_anthropic_tools(self, request: ProviderRequest) -> list[dict]:
         return [

@@ -32,7 +32,13 @@ async def post_message(
         raise HTTPException(status_code=403, detail="Not authorized to access this conversation.")
 
         
-    response_text = await manager.process_turn(conversation_id, message.content, session_id, principal.identity)
+    response_text = await manager.process_turn(
+        conversation_id, 
+        message.content, 
+        session_id, 
+        principal.identity,
+        message.metadata
+    )
     
     from app.core.database import MessageRecord
     last_msg = db.query(MessageRecord).filter_by(conversation_id=conversation_id).order_by(MessageRecord.id.desc()).first()

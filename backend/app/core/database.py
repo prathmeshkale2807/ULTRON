@@ -247,7 +247,7 @@ class ConversationRecord(Base):
 
     conversation_id: Mapped[str] = mapped_column(String(64), primary_key=True)
     session_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
-    state: Mapped[str] = mapped_column(String(32), default="idle")
+    state: Mapped[str] = mapped_column(String(32), default="IDLE")
     active_task_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     active_plan_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     pending_confirmation_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
@@ -265,6 +265,20 @@ class MessageRecord(Base):
     content: Mapped[str] = mapped_column(String(4096), default="")
     metadata_json: Mapped[str | None] = mapped_column(String(2048), nullable=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+class AttachmentRecord(Base):
+    """An uploaded or generated file attachment (e.g., image) associated with a message."""
+    __tablename__ = "attachments"
+
+    attachment_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), index=True)
+    conversation_id: Mapped[str] = mapped_column(String(64), index=True)
+    message_id: Mapped[int | None] = mapped_column(Integer, index=True, nullable=True)
+    mime_type: Mapped[str] = mapped_column(String(64))
+    size: Mapped[int] = mapped_column(Integer)
+    file_path: Mapped[str] = mapped_column(String(1024))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class MemoryRecord(Base):
@@ -443,6 +457,7 @@ def create_all_for_tests(bind=None) -> None:
     fixture creates its own isolated engine after monkeypatching DATABASE_URL.
     """
     target = bind if bind is not None else engine
+    import app.automations.models  # ensure models are registered
     Base.metadata.create_all(bind=target)
 
 

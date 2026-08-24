@@ -37,11 +37,28 @@ class GeminiProvider(AIProvider):
 
     def _to_contents(self, request: ProviderRequest) -> list[dict]:
         role_map = {"user": "user", "assistant": "model"}
-        return [
-            {"role": role_map.get(m.role, "user"), "parts": [{"text": m.content}]}
-            for m in request.messages
-            if m.role != "system"
-        ]
+        contents = []
+        for m in request.messages:
+            if m.role == "system":
+                continue
+            
+            parts = []
+            if isinstance(m.content, str):
+                parts.append({"text": m.content})
+            else:
+                for cp in m.content:
+                    if cp.type == "text":
+                        parts.append({"text": cp.text})
+                    elif cp.type == "image":
+                        parts.append({
+                            "inline_data": {
+                                "mime_type": cp.mime_type,
+                                "data": cp.data
+                            }
+                        })
+            
+            contents.append({"role": role_map.get(m.role, "user"), "parts": parts})
+        return contents
 
     def _to_gemini_tools(self, request: ProviderRequest) -> list[genai_types.Tool] | None:
         if not request.tools:

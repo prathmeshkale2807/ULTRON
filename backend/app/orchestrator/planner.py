@@ -4,6 +4,8 @@ from typing import Any
 from app.conversation.intent import IntentExtraction
 from app.ai_providers.base import ProviderRequest, Message, Sensitivity
 
+from app.ai_providers.base import ProviderRequest, Message, Sensitivity, ContentPart
+
 class StepDefinition(BaseModel):
     tool_name: str
     arguments: dict[str, Any]
@@ -14,7 +16,7 @@ class PlanDefinition(BaseModel):
     steps: list[StepDefinition]
     expected_verification: str | None = None
 
-async def create_plan(manager, intent: IntentExtraction, available_tools_schema: str, sensitivity: str = "INTERNAL") -> PlanDefinition | None:
+async def create_plan(manager, intent: IntentExtraction, available_tools_schema: str, sensitivity: str = "INTERNAL", current_message: str | list[ContentPart] | None = None) -> PlanDefinition | None:
     if intent.intent_type not in ["TOOL_ACTION", "MULTI_STEP_TASK"]:
         return None
         
@@ -25,10 +27,18 @@ async def create_plan(manager, intent: IntentExtraction, available_tools_schema:
         "Available Tools:\n" + available_tools_schema
     )
     
-    prompt = f"Objective: {intent.requested_outcome}\nEntities: {intent.entities}"
+    if isinstance(current_message, list):
+        parts = [ContentPart(type="text", text=f"Objective: {intent.requested_outcome}\nEntities: {intent.entities}\nUser Message: ")]
+        parts.extend(current_message)
+        messages = [Message(role="user", content=parts)]
+    else:
+        prompt = f"Objective: {intent.requested_outcome}\nEntities: {intent.entities}"
+        if current_message:
+            prompt += f"\nUser Message: {current_message}"
+        messages = [Message(role="user", content=prompt)]
     
     request = ProviderRequest(
-        messages=[Message(role="user", content=prompt)],
+        messages=messages,
         system_prompt=system_prompt,
         sensitivity=Sensitivity[sensitivity], 
         max_tokens=800

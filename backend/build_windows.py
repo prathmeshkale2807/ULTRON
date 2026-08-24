@@ -15,6 +15,11 @@ def build_backend():
     # We use uvicorn to run our app module directly, but PyInstaller needs an entry point script.
     entry_script = backend_dir / "run_server.py"
     with open(entry_script, "w", encoding="utf-8") as f:
+        f.write("import sys\n")
+        f.write("if '--get-auth-token' in sys.argv:\n")
+        f.write("    from app.security.local_auth import get_or_create_local_token\n")
+        f.write("    print(get_or_create_local_token())\n")
+        f.write("    sys.exit(0)\n")
         f.write("import uvicorn\n")
         f.write("from app.main import app\n")
         f.write("if __name__ == '__main__':\n")

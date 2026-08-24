@@ -13,6 +13,9 @@ api_router.include_router(sessions.router, tags=["sessions"])
 api_router.include_router(tasks.router, tags=["tasks"])
 api_router.include_router(conversations.router, tags=["conversations"])
 api_router.include_router(devices.router, tags=["devices"])
+
+from app.api import attachments
+api_router.include_router(attachments.router, tags=["attachments"])
 from app.api import memory
 api_router.include_router(memory.router, tags=["memory"])
 

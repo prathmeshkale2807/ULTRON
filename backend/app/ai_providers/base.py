@@ -51,9 +51,25 @@ class ToolCall:
 
 
 @dataclass(frozen=True)
+class ContentPart:
+    """A single piece of multimodal content. type is 'text' or 'image'."""
+    type: str
+    text: str | None = None
+    mime_type: str | None = None
+    data: bytes | None = None
+    
+    def __repr__(self) -> str:
+        # Crucial Security Constraint: Never log raw image bytes or base64
+        # to prevent leaking sensitive screenshot data into system logs.
+        if self.type == "image":
+            data_len = len(self.data) if self.data else 0
+            return f"ContentPart(type='image', mime_type={self.mime_type!r}, data_bytes={data_len})"
+        return f"ContentPart(type='text', text={self.text!r})"
+
+@dataclass(frozen=True)
 class Message:
     role: str  # "user" | "assistant" | "system"
-    content: str
+    content: str | list[ContentPart]
 
 
 @dataclass(frozen=True)

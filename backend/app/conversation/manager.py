@@ -57,10 +57,49 @@ class ConversationManager:
             history += f"{m.role.upper()}: {m.content}\n"
         return history
 
-    async def process_turn(self, conversation_id: str, user_text: str, session_id: str | None, principal_id: str) -> str:
+    async def process_turn(self, conversation_id: str, user_text: str, session_id: str | None, principal_id: str, metadata: dict | None = None) -> str:
         conv = self.get_or_create(conversation_id, session_id)
-        self.add_message(conversation_id, MessageRoleEnum.USER, user_text)
         
+        # Process incoming attachments
+        stored_refs = []
+        if metadata and "attachments" in metadata:
+            import base64
+            from app.core.images import process_image
+            from app.conversation.attachments import save_attachment
+            
+            raw_attachments = metadata.pop("attachments")
+            for att in raw_attachments:
+                try:
+                    data = base64.b64decode(att["data_base64"])
+                    mime, norm_data = process_image(data)
+                    record = save_attachment(
+                        db=self.db,
+                        principal_id=principal_id,
+                        conversation_id=conversation_id,
+                        mime_type=mime,
+                        data=norm_data
+                    )
+                    stored_refs.append({"attachment_id": record.attachment_id, "mime_type": mime})
+                except Exception as e:
+                    import logging
+                    logging.getLogger(__name__).warning(f"Failed to process attachment: {e}")
+                    
+            if stored_refs:
+                metadata["attachments"] = stored_refs
+                
+        msg = self.add_message(conversation_id, MessageRoleEnum.USER, user_text, metadata)
+        
+        # Update message_id on the saved attachments
+        if stored_refs:
+            from app.core.database import AttachmentRecord
+            from sqlalchemy import update
+            self.db.execute(
+                update(AttachmentRecord)
+                .where(AttachmentRecord.attachment_id.in_([r["attachment_id"] for r in stored_refs]))
+                .values(message_id=msg.id)
+            )
+            self.db.commit()
+            
         # Phase 9: Memory Retrieval
         from app.memory.store import MemoryStore
         memory_store = MemoryStore(self.db, principal_id)
@@ -91,7 +130,21 @@ class ConversationManager:
         # We append memory_context to history so intent and planner see it
         enriched_history = f"{memory_context}\nConversation History:\n{history}"
         
-        intent = await extract_intent(self.provider, user_text, enriched_history, sensitivity=max_sensitivity)
+        from app.ai_providers.base import ContentPart
+        if stored_refs:
+            from app.conversation.attachments import get_attachment
+            parts = [ContentPart(type="text", text=user_text)]
+            for ref in stored_refs:
+                try:
+                    _, data = get_attachment(self.db, ref["attachment_id"], principal_id)
+                    parts.append(ContentPart(type="image", mime_type=ref["mime_type"], data=data))
+                except Exception as e:
+                    pass
+            current_message = parts
+        else:
+            current_message = user_text
+        
+        intent = await extract_intent(self.provider, current_message, enriched_history, sensitivity=max_sensitivity)
         
         # 2. Check Cancellation
         if intent.intent_type == "CANCELLATION":
@@ -125,7 +178,7 @@ class ConversationManager:
             registry = get_registry()
             tools_schema = json.dumps([{t.name: t.description} for t in registry.list_tools()])
             try:
-                plan = await create_plan(self.provider, intent, tools_schema, sensitivity=max_sensitivity)
+                plan = await create_plan(self.provider, intent, tools_schema, sensitivity=max_sensitivity, current_message=current_message)
             except Exception as e:
                 return f"Failed to plan: {e}"
                 
@@ -161,13 +214,36 @@ class ConversationManager:
                 await asyncio.sleep(0.1)
                 
             history_entries = self.task_manager.get_audit_history(task.task_id, session_id=session_id)
-            exec_results = "\n".join([f"{e.event}: {e.detail}" for e in history_entries])
-            if not exec_results:
+            exec_results = ""
+            visual_context = []
+            
+            import base64
+            for e in history_entries:
+                try:
+                    detail_data = json.loads(e.detail)
+                    if "image_base64_secret" in detail_data:
+                        b64 = detail_data.pop("image_base64_secret")
+                        try:
+                            decoded = base64.b64decode(b64)
+                            visual_context.append(ContentPart(type="image", mime_type="image/png", data=decoded))
+                        except Exception:
+                            pass
+                    exec_results += f"{e.event}: {json.dumps(detail_data)}\n"
+                except Exception:
+                    exec_results += f"{e.event}: {e.detail}\n"
+                    
+            if not exec_results.strip():
                 exec_results = f"Task finished with state: {task.state}"
                 if task.error_summary:
                     exec_results += f" Error: {task.error_summary}"
             
-            response_text = await generate_response(self.provider, f"Planned task {task.task_id} with objective: {plan.objective} finished with state {task.state}.", exec_results, sensitivity=max_sensitivity)
+            response_text = await generate_response(
+                self.provider, 
+                f"Planned task {task.task_id} with objective: {plan.objective} finished with state {task.state}.", 
+                exec_results, 
+                sensitivity=max_sensitivity,
+                visual_context=visual_context if visual_context else None
+            )
             self.add_message(conversation_id, MessageRoleEnum.ASSISTANT, response_text)
             _trigger_memory_extraction(self.provider, user_text, response_text, principal_id, self.db, session_id)
             return response_text

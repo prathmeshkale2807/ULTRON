@@ -41,11 +41,15 @@ async def lifespan(app: FastAPI):
     
     import os
     if os.environ.get("ENVIRONMENT") != "test":
-        from app.core.database import run_migrations
+        from app.core.database import run_migrations, SessionLocal
+        from app.conversation.attachments import reconcile_orphaned_attachments
         try:
             run_migrations()
+            # Perform reconciliation as a safety net
+            with SessionLocal() as db:
+                reconcile_orphaned_attachments(db)
         except Exception as e:
-            logger.critical("Failed to migrate database: %s", e)
+            logger.critical("Failed to migrate database or reconcile: %s", e)
             sys.exit(1)
             
         if not schema_is_current():

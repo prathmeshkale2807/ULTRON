@@ -1,6 +1,25 @@
+#[tauri::command]
+async fn get_local_auth_token(app: tauri::AppHandle) -> Result<String, String> {
+    use tauri_plugin_shell::ShellExt;
+    let shell = app.shell();
+    let command = shell.sidecar("ultron-backend")
+        .map_err(|e| e.to_string())?
+        .args(["--get-auth-token"]);
+        
+    let output = command.output().await.map_err(|e| e.to_string())?;
+    
+    if output.status.success() {
+        let token = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        Ok(token)
+    } else {
+        Err(format!("Failed to get token: {}", String::from_utf8_lossy(&output.stderr)))
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![get_local_auth_token])
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             use tauri::Manager;

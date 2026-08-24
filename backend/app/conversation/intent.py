@@ -14,7 +14,9 @@ class IntentExtraction(BaseModel):
     requested_outcome: str | None = Field(None, description="A clear summary of what the user wants to achieve.")
     clarification_needed: str | None = Field(None, description="If confidence is Low/Medium, what specifically needs to be clarified?")
 
-async def extract_intent(manager, current_message: str, recent_context: str, sensitivity: str = "INTERNAL") -> IntentExtraction:
+from app.ai_providers.base import ProviderRequest, Message, Sensitivity, ContentPart
+
+async def extract_intent(manager, current_message: str | list[ContentPart], recent_context: str, sensitivity: str = "INTERNAL") -> IntentExtraction:
     """Uses the provider manager to extract structured intent."""
     system_prompt = (
         "You are the intent resolution engine for ULTRON. Your job is to classify "
@@ -23,10 +25,16 @@ async def extract_intent(manager, current_message: str, recent_context: str, sen
         "Schema:\n" + IntentExtraction.schema_json()
     )
     
-    prompt = f"Context:\n{recent_context}\n\nUser Message: {current_message}"
+    if isinstance(current_message, str):
+        prompt = f"Context:\n{recent_context}\n\nUser Message: {current_message}"
+        messages = [Message(role="user", content=prompt)]
+    else:
+        parts = [ContentPart(type="text", text=f"Context:\n{recent_context}\n\nUser Message: ")]
+        parts.extend(current_message)
+        messages = [Message(role="user", content=parts)]
     
     request = ProviderRequest(
-        messages=[Message(role="user", content=prompt)],
+        messages=messages,
         system_prompt=system_prompt,
         sensitivity=Sensitivity[sensitivity],
         max_tokens=500
