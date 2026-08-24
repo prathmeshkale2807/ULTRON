@@ -468,3 +468,30 @@ def get_db() -> Generator[Session, None, None]:
         yield db
     finally:
         db.close()
+
+class AgentRecord(Base):
+    __tablename__ = "agent_records"
+    
+    agent_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    parent_agent_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    principal_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    session_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    task_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    execution_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    role: Mapped[str] = mapped_column(String(32), nullable=False)
+    state: Mapped[str] = mapped_column(String(32), default="CREATED", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    generation_id: Mapped[int] = mapped_column(Integer, default=1)
+    
+class AgentMessageRecord(Base):
+    __tablename__ = "agent_messages"
+    
+    message_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    sender_agent_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    recipient_agent_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    root_task_id: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    generation_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    message_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    payload_json: Mapped[str] = mapped_column(String(4000), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
