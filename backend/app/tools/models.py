@@ -77,6 +77,7 @@ class PermissionCategory(str, Enum):
     PC_READ = "pc_read"
     PC_PROCESS_CONTROL = "pc_process_control"
     PC_SCREEN_CAPTURE = "pc_screen_capture"
+    PC_INPUT_CONTROL = "pc_input_control"
     
     # Phase 11: Android Device
     ANDROID_DEVICE_READ = "android_device_read"
@@ -84,6 +85,7 @@ class PermissionCategory(str, Enum):
     ANDROID_SMS_SEND = "android_sms_send"
     ANDROID_DEVICE_CONTROL = "android_device_control"
     ANDROID_NOTIFICATION_READ = "android_notification_read"
+    ANDROID_INPUT_CONTROL = "android_input_control"
     
     OTHER = "other"
 

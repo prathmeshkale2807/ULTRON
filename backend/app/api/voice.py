@@ -12,37 +12,65 @@ from app.voice.models import VoiceConfig, AudioFormat
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
+import time
+from pydantic import BaseModel
+from fastapi import HTTPException, Header
+
+_voice_tickets = {}
+
+class VoiceTicketRequest(BaseModel):
+    device_id: str | None = None
+    credential: str | None = None
+
+@router.post("/ticket")
+def create_voice_ticket(
+    request: VoiceTicketRequest,
+    x_ultron_auth: str | None = Header(default=None),
+    db: Session = Depends(get_db)
+):
+    principal_id = None
+    if request.device_id and request.credential:
+        manager = DeviceManager(db)
+        try:
+            principal_id = manager.heartbeat(request.device_id, request.credential)
+        except DeviceAuthError as e:
+            raise HTTPException(status_code=403, detail=str(e))
+    elif x_ultron_auth:
+        expected = get_or_create_local_token()
+        if secrets.compare_digest(x_ultron_auth, expected):
+            principal_id = _LOCAL_PRINCIPAL_IDENTITY
+        else:
+            raise HTTPException(status_code=401, detail="Invalid token")
+    else:
+        raise HTTPException(status_code=401, detail="Authentication required")
+        
+    ticket = secrets.token_urlsafe(32)
+    _voice_tickets[ticket] = {
+        "principal_id": principal_id,
+        "expires_at": time.time() + 30
+    }
+    return {"ticket": ticket}
+
 @router.websocket("/ws")
 async def voice_websocket(
     websocket: WebSocket, 
-    token: str | None = None,
-    device_id: str | None = None,
-    credential: str | None = None,
+    ticket: str | None = None,
     db: Session = Depends(get_db)
 ):
     await websocket.accept()
     
     try:
-        principal_id = None
-        session_id = None
-        
-        if device_id and credential:
-            manager = DeviceManager(db)
-            try:
-                principal_id = manager.heartbeat(device_id, credential)
-            except DeviceAuthError:
-                await websocket.close(code=4001, reason="Unauthorized Android Device")
-                return
-        elif token:
-            expected = get_or_create_local_token()
-            if secrets.compare_digest(token, expected):
-                principal_id = _LOCAL_PRINCIPAL_IDENTITY
-            else:
-                await websocket.close(code=4001, reason="Unauthorized Desktop Session")
-                return
-        else:
+        if not ticket or ticket not in _voice_tickets:
             await websocket.close(code=4001, reason="Authentication Required")
             return
+            
+        record = _voice_tickets.pop(ticket)
+        if record["expires_at"] < time.time():
+            await websocket.close(code=4001, reason="Ticket Expired")
+            return
+            
+        principal_id = record["principal_id"]
+        session_id = None
 
         try:
             config_msg = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)

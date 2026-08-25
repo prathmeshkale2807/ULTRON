@@ -36,6 +36,33 @@ engine = create_engine(
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+import os
+
+@event.listens_for(Engine, "connect")
+def set_sqlite_pragma(dbapi_connection, connection_record):
+    if "sqlite" in settings.database_url:
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+        try:
+            _ensure_wal_permissions()
+        except Exception:
+            pass
+
+def _ensure_wal_permissions():
+    if "sqlite" in settings.database_url and settings.database_url.startswith("sqlite:///"):
+        db_path = settings.database_url.replace("sqlite:///", "")
+        if os.path.exists(db_path):
+            mode = os.stat(db_path).st_mode
+            for ext in ["-wal", "-shm"]:
+                ext_path = db_path + ext
+                if os.path.exists(ext_path):
+                    os.chmod(ext_path, mode)
+
 
 class Base(DeclarativeBase):
     pass

@@ -41,7 +41,10 @@ from app.tasks.models import (
 
 logger = get_logger("tasks.worker")
 
-MAX_CONCURRENT_TASKS = 4
+from app.core.config import get_settings
+settings = get_settings()
+MAX_CONCURRENT_TASKS = getattr(settings, 'max_concurrent_tasks', 16)
+MAX_QUEUE_SIZE = getattr(settings, 'max_task_queue_size', 1000)
 
 # Type alias for a zero-argument callable that returns an SQLAlchemy Session.
 SessionFactory = Callable[[], Any]
@@ -67,7 +70,7 @@ class TaskWorker:
     ) -> None:
         self._max_concurrent = max_concurrent
         self._session_factory = session_factory  # None → resolved lazily at first use
-        self._queue: asyncio.PriorityQueue[tuple[int, float, str]] = asyncio.PriorityQueue()
+        self._queue: asyncio.PriorityQueue[tuple[int, float, str]] = asyncio.PriorityQueue(maxsize=MAX_QUEUE_SIZE)
         self._semaphore: asyncio.Semaphore | None = None
         self._running = False
         self._dispatcher_task: asyncio.Task[None] | None = None
@@ -105,7 +108,11 @@ class TaskWorker:
         """Enqueue a task_id for execution. Higher priority = dequeued sooner."""
         # PriorityQueue is a min-heap; negate weight so URGENT (3) → -3 sorts first.
         weight = -PRIORITY_WEIGHT[priority]
-        await self._queue.put((weight, time.monotonic(), task_id))
+        try:
+            self._queue.put_nowait((weight, time.monotonic(), task_id))
+        except asyncio.QueueFull:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=429, detail="Task queue is full (QUEUE_FULL). Please try again later.")
         logger.info(
             "Task submitted to worker task_id=%s priority=%s", task_id, priority.value
         )

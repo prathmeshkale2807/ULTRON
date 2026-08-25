@@ -26,20 +26,26 @@ def device(db_session: Session):
 def test_ws_authentication_success(device):
     dev_id = device["device_id"]
     cred = device["credential"]
-    with client.websocket_connect(f"/api/devices/ws?device_id={dev_id}&credential={cred}") as websocket:
+    ticket_resp = client.post("/api/devices/ticket", json={"device_id": dev_id, "credential": cred})
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    with client.websocket_connect(f"/api/devices/ws?ticket={ticket}") as websocket:
         # If it connects without raising WebSocketDisconnect(4001), it's successful
         assert True
 
 def test_ws_authentication_invalid_credential(device):
     dev_id = device["device_id"]
     with pytest.raises(WebSocketDisconnect) as excinfo:
-        with client.websocket_connect(f"/api/devices/ws?device_id={dev_id}&credential=invalid"):
+        ticket_resp = client.post("/api/devices/ticket", json={"device_id": dev_id, "credential": "invalid"})
+        ticket = ticket_resp.json().get("ticket", "invalid")
+        with client.websocket_connect(f"/api/devices/ws?ticket={ticket}") :
             pass
     assert excinfo.value.code == 4001
 
 def test_ws_authentication_unknown_device(db_session):
     with pytest.raises(WebSocketDisconnect) as excinfo:
-        with client.websocket_connect(f"/api/devices/ws?device_id=unknown&credential=valid"):
+        ticket_resp = client.post("/api/devices/ticket", json={"device_id": "unknown", "credential": "valid"})
+        ticket = ticket_resp.json().get("ticket", "invalid")
+        with client.websocket_connect(f"/api/devices/ws?ticket={ticket}") :
             pass
     assert excinfo.value.code == 4001
 
@@ -50,6 +56,8 @@ def test_ws_authentication_revoked_device(device, db_session):
     dev_id = device["device_id"]
     cred = device["credential"]
     with pytest.raises(WebSocketDisconnect) as excinfo:
-        with client.websocket_connect(f"/api/devices/ws?device_id={dev_id}&credential={cred}"):
+        ticket_resp = client.post("/api/devices/ticket", json={"device_id": dev_id, "credential": cred})
+        ticket = ticket_resp.json().get("ticket", "invalid")
+        with client.websocket_connect(f"/api/devices/ws?ticket={ticket}") :
             pass
     assert excinfo.value.code == 4001

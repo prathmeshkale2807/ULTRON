@@ -17,6 +17,7 @@ from app.tools.models import (
 )
 from app.tools.registry import ToolRegistry
 from app.windows.applications import open_application, close_application, list_running_applications
+from app.windows.automation import generate_snapshot, click_control, select_control, focus_window, AutomationError, StaleTargetError, SecurityError
 from app.windows.system import get_system_info, get_active_window
 from app.windows.screenshot import take_screenshot
 
@@ -219,6 +220,122 @@ tool_get_active_window = ToolDefinition(
 # Registration
 # ==============================================================================
 
+
+async def handle_windows_get_ui_tree(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    return generate_snapshot()
+
+async def handle_windows_click_control(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        click_control(
+            arguments["snapshot_id"], 
+            arguments["control_id"], 
+            arguments["expected_app"], 
+            arguments["expected_window"]
+        )
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+async def handle_windows_select_control(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        select_control(
+            arguments["snapshot_id"], 
+            arguments["control_id"], 
+            arguments["expected_app"], 
+            arguments["expected_window"]
+        )
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+async def handle_windows_focus_window(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        focus_window(arguments["application_name"], arguments["window_title"])
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+tool_get_ui_tree = ToolDefinition(
+    name="windows_get_ui_tree",
+    description="Extracts the active window's UI hierarchy.",
+    input_schema={"type": "object", "properties": {}},
+    output_schema={"type": "object"},
+    risk_level=RiskLevel.LOW,
+    permission_category=PermissionCategory.PC_READ,
+    confirmation_tier=ConfirmationTier.AUTOMATIC,
+    verification_method=VerificationMethod.NONE,
+    allowed_devices=[DeviceType.PC],
+    retry_policy=RetryPolicy(max_attempts=1),
+    handler=handle_windows_get_ui_tree,
+)
+
+tool_click_control = ToolDefinition(
+    name="windows_click_control",
+    description="Clicks a semantic UI target.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "snapshot_id": {"type": "string"},
+            "control_id": {"type": "string"},
+            "expected_app": {"type": "string"},
+            "expected_window": {"type": "string"}
+        },
+        "required": ["snapshot_id", "control_id", "expected_app", "expected_window"]
+    },
+    output_schema={"type": "object"},
+    risk_level=RiskLevel.HIGH,
+    permission_category=PermissionCategory.PC_INPUT_CONTROL,
+    confirmation_tier=ConfirmationTier.ALWAYS_ASK,
+    verification_method=VerificationMethod.MANUAL,
+    allowed_devices=[DeviceType.PC],
+    retry_policy=RetryPolicy(max_attempts=1),
+    handler=handle_windows_click_control,
+)
+
+tool_select_control = ToolDefinition(
+    name="windows_select_control",
+    description="Selects a semantic UI target.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "snapshot_id": {"type": "string"},
+            "control_id": {"type": "string"},
+            "expected_app": {"type": "string"},
+            "expected_window": {"type": "string"}
+        },
+        "required": ["snapshot_id", "control_id", "expected_app", "expected_window"]
+    },
+    output_schema={"type": "object"},
+    risk_level=RiskLevel.HIGH,
+    permission_category=PermissionCategory.PC_INPUT_CONTROL,
+    confirmation_tier=ConfirmationTier.ALWAYS_ASK,
+    verification_method=VerificationMethod.MANUAL,
+    allowed_devices=[DeviceType.PC],
+    retry_policy=RetryPolicy(max_attempts=1),
+    handler=handle_windows_select_control,
+)
+
+tool_focus_window = ToolDefinition(
+    name="windows_focus_window",
+    description="Brings a known window into the foreground.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "application_name": {"type": "string"},
+            "window_title": {"type": "string"}
+        },
+        "required": ["application_name", "window_title"]
+    },
+    output_schema={"type": "object"},
+    risk_level=RiskLevel.MEDIUM,
+    permission_category=PermissionCategory.PC_PROCESS_CONTROL,
+    confirmation_tier=ConfirmationTier.ASK_ONCE_PER_SESSION,
+    verification_method=VerificationMethod.NONE,
+    allowed_devices=[DeviceType.PC],
+    retry_policy=RetryPolicy(max_attempts=1),
+    handler=handle_windows_focus_window,
+)
+
 def register_windows_tools(registry: ToolRegistry) -> None:
     registry.register(tool_open_application, replace=True)
     registry.register(tool_close_application, replace=True)
@@ -226,3 +343,8 @@ def register_windows_tools(registry: ToolRegistry) -> None:
     registry.register(tool_get_system_info, replace=True)
     registry.register(tool_take_screenshot, replace=True)
     registry.register(tool_get_active_window, replace=True)
+    registry.register(tool_get_ui_tree, replace=True)
+    registry.register(tool_click_control, replace=True)
+    registry.register(tool_select_control, replace=True)
+    registry.register(tool_focus_window, replace=True)
+

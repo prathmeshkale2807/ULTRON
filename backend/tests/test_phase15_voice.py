@@ -51,7 +51,11 @@ def test_speech_start_triggers_barge_in(desktop_auth, monkeypatch):
         
     monkeypatch.setattr("app.conversation.manager.ConversationManager.process_turn", mock_process_turn)
     
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()
         
@@ -88,7 +92,11 @@ def test_silence_does_not_trigger_barge_in(desktop_auth, monkeypatch):
         
     monkeypatch.setattr("app.conversation.manager.ConversationManager.process_turn", mock_process_turn)
     
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()
         
@@ -111,7 +119,11 @@ def test_stale_tts_chunk_rejected(desktop_auth, monkeypatch):
         
     monkeypatch.setattr("app.conversation.manager.ConversationManager.process_turn", mock_process_turn)
     
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()
         
@@ -133,7 +145,9 @@ def test_stale_tts_chunk_rejected(desktop_auth, monkeypatch):
             pass
 
 def test_emergency_stop_still_cancels_global_work(desktop_auth, db_session):
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()
         

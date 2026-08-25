@@ -53,6 +53,8 @@ class Settings(BaseSettings):
 
     # --- App identity -----------------------------------------------------
     app_name: str = "ULTRON Core Service"
+    max_concurrent_tasks: int = Field(default=16, le=64)
+    max_task_queue_size: int = Field(default=1000)
     environment: str = Field(default="development")  # development | production
     debug: bool = Field(default=True)
 
@@ -116,9 +118,17 @@ class Settings(BaseSettings):
     def ensure_data_dirs(self) -> None:
         """Create local data/log directories if they don't exist yet."""
         Path(self.log_dir).mkdir(parents=True, exist_ok=True)
-        Path(self.database_url.replace("sqlite:///", "")).parent.mkdir(
-            parents=True, exist_ok=True
-        )
+        db_dir = Path(self.database_url.replace("sqlite:///", "")).parent
+        db_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Phase 27: Enforce Windows ACLs on the top-level ULTRON directory
+        from app.core.acl import secure_directory_windows
+        # self.data_dir is usually LOCALAPPDATA/ULTRON/data, we want LOCALAPPDATA/ULTRON
+        ultron_dir = self.data_dir.parent
+        if ultron_dir.name == "ULTRON":
+            secure_directory_windows(ultron_dir)
+        else:
+            secure_directory_windows(self.data_dir)
 
 
 @lru_cache

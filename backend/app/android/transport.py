@@ -49,6 +49,9 @@ class WebSocketAndroidTransport:
         if device_id not in self.connections:
             raise DeviceOfflineError("DEVICE_OFFLINE")
             
+        if len(self.pending_requests) > getattr(ctx, "max_pending_requests", 500):
+            raise TransportError("QUEUE_FULL")
+            
         ws = self.connections[device_id]
         # We use our own request_id for transport correlation
         request_id = f"req-{uuid.uuid4()}"

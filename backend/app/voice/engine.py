@@ -40,7 +40,7 @@ class VoiceSession:
         self.generation_task: Optional[asyncio.Task] = None
         self.watchdog_task: Optional[asyncio.Task] = None
         
-        self.ws_send_queue = asyncio.Queue()
+        self.ws_send_queue = asyncio.Queue(maxsize=100)
         self.is_closed = False
         self.state = VoiceSessionState.LISTENING
         self.last_activity = asyncio.get_running_loop().time()
@@ -193,14 +193,22 @@ class VoiceSession:
         self.state = VoiceSessionState.CLOSED
         
         current_task = asyncio.current_task()
+        tasks_to_await = []
         if self.watchdog_task and self.watchdog_task != current_task:
             self.watchdog_task.cancel()
+            tasks_to_await.append(self.watchdog_task)
         if self.stt_task and self.stt_task != current_task:
             self.stt_task.cancel()
+            tasks_to_await.append(self.stt_task)
         if self.generation_task and self.generation_task != current_task:
             self.generation_task.cancel()
+            tasks_to_await.append(self.generation_task)
         if self.tts_task and self.tts_task != current_task:
             self.tts_task.cancel()
+            tasks_to_await.append(self.tts_task)
+            
+        if tasks_to_await:
+            await asyncio.gather(*tasks_to_await, return_exceptions=True)
             
         await self.stt.close()
         await self.tts.close()

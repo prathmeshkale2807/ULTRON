@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import Any
+from app.android.automation import dump_ui, tap_allowlisted_target, swipe_allowlisted_target, press_keycode, AutomationError, StaleTargetError, SecurityError
 from app.tools.models import (
     ConfirmationTier,
     DeviceType,
@@ -8,6 +9,7 @@ from app.tools.models import (
     RiskLevel,
     ToolDefinition,
     VerificationMethod,
+    RetryPolicy,
     ExecutionContext
 )
 from app.android.transport import get_transport, TransportError
@@ -213,7 +215,131 @@ async def handle_android_get_battery(ctx: ExecutionContext, arguments: dict[str,
         return {"status": "error", "error": str(e)}
 
 
+
+async def handle_android_dump_ui(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    return dump_ui(arguments["target_device_id"])
+
+async def handle_android_tap_allowlisted_target(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        tap_allowlisted_target(
+            arguments["target_device_id"], 
+            arguments["snapshot_id"], 
+            arguments["resource_id"], 
+            arguments["expected_package"]
+        )
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+async def handle_android_swipe_allowlisted_target(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        swipe_allowlisted_target(
+            arguments["target_device_id"], 
+            arguments["snapshot_id"], 
+            arguments["resource_id"], 
+            arguments["expected_package"]
+        )
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+async def handle_android_press_keycode(ctx: ExecutionContext, arguments: dict[str, Any]) -> dict[str, Any]:
+    try:
+        press_keycode(arguments["target_device_id"], arguments["keycode"])
+        return {"success": True}
+    except Exception as e:
+        return {"success": False, "error": str(e)}
+
+tool_dump_ui = ToolDefinition(
+    name="android_dump_ui",
+    description="Extracts the active screen's UI hierarchy.",
+    input_schema={
+        "type": "object", 
+        "properties": {"target_device_id": {"type": "string"}},
+        "required": ["target_device_id"]
+    },
+    output_schema={"type": "object"},
+    risk_level=RiskLevel.LOW,
+    permission_category=PermissionCategory.ANDROID_DEVICE_READ,
+    confirmation_tier=ConfirmationTier.AUTOMATIC,
+    verification_method=VerificationMethod.NONE,
+    allowed_devices=[DeviceType.ANDROID],
+    retry_policy=RetryPolicy(max_attempts=1),
+    handler=handle_android_dump_ui,
+)
+
+tool_tap_allowlisted_target = ToolDefinition(
+    name="android_tap_allowlisted_target",
+    description="Taps a semantic UI target.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "target_device_id": {"type": "string"},
+            "snapshot_id": {"type": "string"},
+            "resource_id": {"type": "string"},
+            "expected_package": {"type": "string"}
+        },
+        "required": ["target_device_id", "snapshot_id", "resource_id", "expected_package"]
+    },
+    output_schema={"type": "object"},
+    risk_level=RiskLevel.HIGH,
+    permission_category=PermissionCategory.ANDROID_INPUT_CONTROL,
+    confirmation_tier=ConfirmationTier.ALWAYS_ASK,
+    verification_method=VerificationMethod.MANUAL,
+    allowed_devices=[DeviceType.ANDROID],
+    retry_policy=RetryPolicy(max_attempts=1),
+    handler=handle_android_tap_allowlisted_target,
+)
+
+tool_swipe_allowlisted_target = ToolDefinition(
+    name="android_swipe_allowlisted_target",
+    description="Swipes on a semantic UI target.",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "target_device_id": {"type": "string"},
+            "snapshot_id": {"type": "string"},
+            "resource_id": {"type": "string"},
+            "expected_package": {"type": "string"}
+        },
+        "required": ["target_device_id", "snapshot_id", "resource_id", "expected_package"]
+    },
+    output_schema={"type": "object"},
+    risk_level=RiskLevel.HIGH,
+    permission_category=PermissionCategory.ANDROID_INPUT_CONTROL,
+    confirmation_tier=ConfirmationTier.ALWAYS_ASK,
+    verification_method=VerificationMethod.MANUAL,
+    allowed_devices=[DeviceType.ANDROID],
+    retry_policy=RetryPolicy(max_attempts=1),
+    handler=handle_android_swipe_allowlisted_target,
+)
+
+tool_press_keycode = ToolDefinition(
+    name="android_press_keycode",
+    description="Presses a safe physical key (HOME, BACK).",
+    input_schema={
+        "type": "object",
+        "properties": {
+            "target_device_id": {"type": "string"},
+            "keycode": {"type": "string"}
+        },
+        "required": ["target_device_id", "keycode"]
+    },
+    output_schema={"type": "object"},
+    risk_level=RiskLevel.MEDIUM,
+    permission_category=PermissionCategory.ANDROID_INPUT_CONTROL,
+    confirmation_tier=ConfirmationTier.ASK_ONCE_PER_SESSION,
+    verification_method=VerificationMethod.NONE,
+    allowed_devices=[DeviceType.ANDROID],
+    retry_policy=RetryPolicy(max_attempts=1),
+    handler=handle_android_press_keycode,
+)
+
 ANDROID_TOOLS: list[ToolDefinition] = [
+    tool_dump_ui,
+    tool_tap_allowlisted_target,
+    tool_swipe_allowlisted_target,
+    tool_press_keycode,
     ToolDefinition(
         name="android_send_sms",
         description="Sends an SMS message from the paired Android device.",

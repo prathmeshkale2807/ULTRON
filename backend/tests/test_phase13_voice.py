@@ -45,7 +45,9 @@ def test_unauthorized_ws():
     assert excinfo.value.code == 4001
 
 def test_authenticated_desktop_ws(desktop_auth):
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         resp = ws.receive_json()
         assert resp["status"] == "ready"
@@ -56,14 +58,20 @@ def test_authenticated_android_ws(android_auth):
     import urllib.parse
     cred = urllib.parse.quote(cred)
     
-    with client.websocket_connect(f"/api/voice/ws?device_id={dev_id}&credential={cred}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", json={"device_id": dev_id, "credential": cred})
+    
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         resp = ws.receive_json()
         assert resp["status"] == "ready"
 
 def test_audio_format_validation(desktop_auth):
     with pytest.raises(WebSocketDisconnect) as excinfo:
-        with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+        ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+        ticket = ticket_resp.json().get("ticket", "invalid")
+        with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
             ws.send_text(json.dumps({
                 "input_format": {"codec": "mp3", "sample_rate": 16000, "channels": 1},
                 "output_format": {"codec": "mp3", "sample_rate": 24000, "channels": 1}
@@ -74,7 +82,9 @@ def test_audio_format_validation(desktop_auth):
     assert excinfo.value.code == 1003
 
 def test_emergency_stop_voice(desktop_auth, db_session):
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         resp = ws.receive_json()
         
@@ -91,7 +101,11 @@ def test_barge_in_cancellation(desktop_auth, monkeypatch):
     
     monkeypatch.setattr("app.conversation.manager.ConversationManager.process_turn", mock_process_turn)
 
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+
+    ticket = ticket_resp.json().get("ticket", "invalid")
+
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()
         
@@ -116,7 +130,11 @@ def test_no_audio_persistence(desktop_auth, monkeypatch):
     before_wavs = glob.glob("**/*.wav", recursive=True)
     before_mp3s = glob.glob("**/*.mp3", recursive=True)
     
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()
         ws.send_bytes(b"Check privacy")
@@ -133,7 +151,9 @@ def test_client_disconnect(desktop_auth, monkeypatch):
         return "Here is your mocked response"
     
     monkeypatch.setattr("app.conversation.manager.ConversationManager.process_turn", mock_process_turn)
-    ws = client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}")
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    ws = client.websocket_connect(f"/api/voice/ws?ticket={ticket}")
     with ws:
         ws.send_text(get_config_msg())
         ws.receive_json()

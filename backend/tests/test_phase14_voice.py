@@ -43,7 +43,11 @@ def test_watchdog_timeout_in_listening(desktop_auth, db_session, monkeypatch):
     from app.core.config import get_settings
     get_settings.cache_clear()
     
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()
         
@@ -65,7 +69,9 @@ def test_graceful_exit_commands(desktop_auth, db_session, monkeypatch):
     
     for cmd in commands:
         called = False
-        with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+        ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+        ticket = ticket_resp.json().get("ticket", "invalid")
+        with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
             ws.send_text(get_config_msg())
             ws.receive_json()
             
@@ -84,7 +90,11 @@ def test_emergency_stop_kills_db(desktop_auth, db_session, monkeypatch):
     
     monkeypatch.setattr("app.conversation.manager.ConversationManager.process_turn", mock_process_turn)
     
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()
         
@@ -111,7 +121,11 @@ def test_watchdog_suspended_during_processing_and_speaking(desktop_auth, db_sess
         
     monkeypatch.setattr("app.conversation.manager.ConversationManager.process_turn", mock_process_turn)
     
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()
         
@@ -124,6 +138,8 @@ def test_watchdog_suspended_during_processing_and_speaking(desktop_auth, db_sess
     get_settings.cache_clear()
 
 def test_client_disconnect_cleanup(desktop_auth, db_session):
-    with client.websocket_connect(f"/api/voice/ws?token={desktop_auth['token']}") as ws:
+    ticket_resp = client.post("/api/voice/ticket", headers={"X-Ultron-Auth": desktop_auth['token']}, json={})
+    ticket = ticket_resp.json().get("ticket", "invalid")
+    with client.websocket_connect(f"/api/voice/ws?ticket={ticket}") as ws:
         ws.send_text(get_config_msg())
         ws.receive_json()

@@ -59,17 +59,22 @@ async def health_check(db: Session = Depends(get_db)) -> HealthResponse:
 
     # --- Database: prove it's real by writing and reading a row ---------
     try:
-        event = SystemEvent(event_type="health_check", detail="health endpoint pinged db")
-        db.add(event)
-        db.commit()
-        db.refresh(event)
-
-        row_count = db.scalar(select(SystemEvent.id).order_by(SystemEvent.id.desc()).limit(1))
+        from fastapi.concurrency import run_in_threadpool
+        
+        def _sync_db_check():
+            event = SystemEvent(event_type="health_check", detail="health endpoint pinged db")
+            db.add(event)
+            db.commit()
+            db.refresh(event)
+            return db.scalar(select(SystemEvent.id).order_by(SystemEvent.id.desc()).limit(1)), event.id
+            
+        row_count, event_id = await run_in_threadpool(_sync_db_check)
+        
         components.append(
             ComponentStatus(
                 name="database",
                 status="ok" if row_count is not None else "unavailable",
-                detail=f"last event id={event.id}",
+                detail=f"last event id={event_id}",
             )
         )
     except Exception as exc:  # noqa: BLE001 -- health check must not raise
