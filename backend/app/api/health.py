@@ -179,3 +179,15 @@ async def get_readiness(request: Request):
     
     return JSONResponse(status_code=503, content={"status": "starting", "detail": "Startup incomplete"})
 
+
+@router.get("/dev-token", include_in_schema=False)
+def get_dev_token():
+    """Development-only endpoint allowing the browser dev server to authenticate."""
+    from app.core.config import get_settings
+    if get_settings().environment != "development":
+        return JSONResponse(status_code=404, content={"detail": "Not found"})
+    from app.security.local_auth import get_or_create_local_token
+    return {"token": get_or_create_local_token()}
+
+
+

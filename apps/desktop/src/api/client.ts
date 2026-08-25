@@ -18,10 +18,26 @@ export class ApiError extends Error {
 export async function initializeApiClient(): Promise<void> {
   if (_authToken) return;
   try {
-    const token = await invoke<string>('get_local_auth_token');
-    if (!token) throw new Error('Received empty token from backend');
-    _authToken = token;
-    console.log('API client authenticated successfully.');
+    try {
+      const token = await invoke<string>('get_local_auth_token');
+      if (token) {
+        _authToken = token;
+        console.log('API client authenticated via Tauri IPC.');
+        return;
+      }
+    } catch {
+      // In browser dev mode, fallback to dev token endpoint
+      const res = await fetch(`${BACKEND_URL}/api/dev-token`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.token) {
+          _authToken = data.token;
+          console.log('API client authenticated via browser dev token.');
+          return;
+        }
+      }
+    }
+    throw new Error('Received empty token from backend');
   } catch (err) {
     console.error('Failed to initialize API client auth token:', err);
     throw new Error('Failed to authenticate with local backend.');
