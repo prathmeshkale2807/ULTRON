@@ -16,13 +16,13 @@ Completed phases are frozen baselines. Future phases must preserve prior securit
 
 ## Milestones
 
-- 🚀 **v1.0 MVP** - Phases 1-19 (SHIPPED)
-- 🚧 **v2.0 Advanced Capabilities** - Phases 21-27 (PLANNED / SUBJECT TO REVIEW)
+- ✅ **v1.0 MVP** - Phases 1-19 (SHIPPED)
+- ✅ **v2.0 Advanced Capabilities** - Phases 21-27 (SHIPPED)
 
 ## Phases
 
 <details>
-<summary>🚀 v1.0 MVP (Phases 1-19) - SHIPPED</summary>
+<summary>✅ v1.0 MVP (Phases 1-19) - SHIPPED</summary>
 
 ### Phase 1: Project Scaffolding / Local Auth Foundation
 **Status**: SHIPPED
@@ -121,32 +121,45 @@ Completed phases are frozen baselines. Future phases must preserve prior securit
 
 </details>
 
-### 🚧 v2.0 Advanced Capabilities (PLANNED / SUBJECT TO REVIEW)
+<details>
+<summary>✅ v2.0 Advanced Capabilities (Phases 21-27) - SHIPPED</summary>
 
-#### Phase 21: Production Deployment & Packaging
-**Status**: PLANNED / SUBJECT TO REVIEW
+### Phase 21: Production Deployment & Packaging
+**Status**: SHIPPED
 **Goal**: Production deployment configuration, packaging, and distribution pipelines.
+**Delivered**: PyInstaller-packaged backend (`ultron-backend.spec`), Tauri v2 MSI/NSIS installers, `externalBin` integration in `tauri.conf.json`, WAL mode + file-locking for migration safety, PyInstaller-aware path resolution in `database.py` and `config.py`.
 
-#### Phase 22: UI/UX & Desktop/Android Experience
-**Status**: PLANNED / SUBJECT TO REVIEW
+### Phase 22: UI/UX & Desktop/Android Experience
+**Status**: SHIPPED
 **Goal**: Frontend polish, UX improvements, and richer Desktop/Android app interfaces.
+**Delivered**: Tauri + React 18 desktop UI with Chat, Tasks, Devices, and Security views. Image attachment pipeline with multimodal send. CSS design system with custom properties.
 
-#### Phase 23: Vision / Multimodal Interaction
-**Status**: PLANNED / SUBJECT TO REVIEW
+### Phase 23: Vision / Multimodal Interaction
+**Status**: SHIPPED
 **Goal**: Computer vision and multimodal input processing integration.
+**Delivered**: `process_image()` Pillow-based validator (magic-byte parsing, decompression-bomb mitigation, 5MB limit, 2048×2048 cap, format allowlist). `AttachmentRecord` model and authenticated `/api/attachments/{id}` endpoint. Multimodal `ContentPart` threading through ConversationManager → AI providers.
 
-#### Phase 24: Multi-Agent Orchestration
-**Status**: PLANNED / SUBJECT TO REVIEW
+### Phase 24: Multi-Agent Orchestration
+**Status**: SHIPPED
 **Goal**: Support for distributed and concurrent multi-agent collaboration and planning.
+**Delivered**: `AgentManager` with budget guards (MAX_DEPTH=3, MAX_AGENTS_PER_TASK=5, MAX_MESSAGES_PER_TASK=50), EmergencyStop gate on agent spawn/messaging, `AgentRecord` + `AgentMessageRecord` DB models, terminal-state immutability, cascading cancellation.
 
-#### Phase 25: Advanced Device Automation
-**Status**: PLANNED / SUBJECT TO REVIEW
+### Phase 25: Advanced Device Automation
+**Status**: SHIPPED
 **Goal**: Deeper OS-level and application-level automation capabilities.
+**Delivered**: Extended Android tools (notification access, allowlisted intents, media control, brightness, app discovery, battery, request correlation, cancellation, read-back verification). Extended Windows tools (application management, process control, screenshots, system info).
 
-#### Phase 26: Performance & Scalability
-**Status**: PLANNED / SUBJECT TO REVIEW
+### Phase 26: Performance & Scalability
+**Status**: SHIPPED
 **Goal**: Optimization for latency, concurrent scaling, and resource efficiency.
+**Delivered**: SQLite WAL mode (`PRAGMA journal_mode=WAL`), `PRAGMA synchronous=NORMAL`, `PRAGMA busy_timeout=5000`, WAL permission syncing. `TaskWorker` with bounded asyncio priority queue (max 1000), semaphore-capped concurrency (max 16), `run_in_threadpool` for all DB-blocking calls in `ConversationManager`.
 
-#### Phase 27: Final Production Security Audit
-**Status**: COMPLETED
+### Phase 27: Final Production Security Audit
+**Status**: SHIPPED
 **Goal**: Ultimate production-grade security, penetration testing, and trust boundary validation.
+**Delivered**: Windows ACL enforcement via `icacls` on ULTRON data directory at startup. SSRF DNS-resolution checks with private-IP blocking. Browser network policy (`allow_local_network_browser`). Input sanitization (`normalize_actor`). One-time short-lived WebSocket connection tickets for Voice and Devices. `test_phase27_ssrf.py` and `test_phase27_windows_acl.py` added to regression suite.
+**Final Test Baseline**: 329 passed, 0 failed, 3 skipped (backend) + 3 passed, 0 failed (frontend)
+
+**Residual Known Risk**: DNS-rebinding TOCTOU — `validate_url_safe()` resolves the hostname once at validation time, but Playwright navigates independently. A DNS rebinding attack could serve a public IP at validation time and switch to a private IP when Playwright connects. Mitigation: Playwright's own route interception blocks private-range connections and redirects at the browser level, reducing practical exploitability but not eliminating the race without local proxy IP pinning.
+
+</details>

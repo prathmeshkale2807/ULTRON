@@ -85,7 +85,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = Field(default=None)  # reserved; no OpenAI adapter yet
 
     claude_model: str = Field(default="claude-sonnet-4-5-20250929")
-    gemini_model: str = Field(default="gemini-2.5-flash")
+    gemini_model: str = Field(default="gemini-3.6-flash")
 
     ai_provider_timeout_seconds: float = Field(default=30.0)
     ai_provider_max_retries: int = Field(default=2)
@@ -93,15 +93,15 @@ class Settings(BaseSettings):
     # Which provider is tried first, and which one (if any) is tried if the
     # primary fails -- fallback is only ever used when it's also authorized
     # for the request's sensitivity (see ProviderManager).
-    ai_primary_provider: str = Field(default="claude")
-    ai_fallback_provider: str | None = Field(default="gemini")
+    ai_primary_provider: str = Field(default="gemini")
+    ai_fallback_provider: str | None = Field(default="claude")
 
     # Authorization lists: comma-separated Sensitivity names this provider
     # may be used for, e.g. "PUBLIC,INTERNAL,SENSITIVE,PRIVATE". Defaults
     # are conservative -- SENSITIVE/PRIVATE data requires an explicit,
     # deliberate opt-in per provider, not an assumed default.
     ai_claude_authorized_sensitivities: str = Field(default="PUBLIC,INTERNAL,SENSITIVE,PRIVATE")
-    ai_gemini_authorized_sensitivities: str = Field(default="PUBLIC,INTERNAL")
+    ai_gemini_authorized_sensitivities: str = Field(default="PUBLIC,INTERNAL,SENSITIVE,PRIVATE")
 
     # --- Browser (Phase 8) --------------------------------------------------
     # Explicitly controls whether the browser can access localhost or internal

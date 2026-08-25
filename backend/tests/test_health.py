@@ -32,10 +32,10 @@ def client(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("ENVIRONMENT", "test")
 
     # Force providers to "not_configured" regardless of the developer's
-    # real shell environment, so this test never makes a live API call
+    # real shell environment or .env file, so this test never makes a live API call
     # and its assertions stay deterministic.
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    monkeypatch.setenv("GEMINI_API_KEY", "")
 
     # Settings and the provider manager are both lru_cache'd -- clear so
     # the env vars above take effect for this test.

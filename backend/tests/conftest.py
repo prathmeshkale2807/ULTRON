@@ -39,5 +39,8 @@ def db_session(tmp_path: Path):
         session.close()
         engine.dispose()
 import os
-os.environ['ENVIRONMENT'] = 'test'
+from dotenv import load_dotenv
+
+load_dotenv()
+os.environ["ENVIRONMENT"] = "test"
 

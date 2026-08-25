@@ -75,14 +75,14 @@ async def test_gemini_generate_real_call():
     config = ProviderConfig(
         provider_name="gemini",
         api_key=os.environ["GEMINI_API_KEY"],
-        model="gemini-2.5-flash",
+        model="gemini-3.6-flash",
         authorized_sensitivities=frozenset({Sensitivity.PUBLIC}),
     )
     provider = GeminiProvider(config)
     request = ProviderRequest(
-        messages=[Message(role="user", content="Reply with exactly one word: hello")],
+        messages=[Message(role="user", content="Hello")],
         sensitivity=Sensitivity.PUBLIC,
-        max_tokens=10,
+        max_tokens=500,
     )
 
     response = await provider.generate(request)
@@ -94,7 +94,7 @@ async def test_gemini_generate_real_call():
 @requires_gemini_key
 async def test_gemini_health_check_real():
     config = ProviderConfig(
-        provider_name="gemini", api_key=os.environ["GEMINI_API_KEY"], model="gemini-2.5-flash"
+        provider_name="gemini", api_key=os.environ["GEMINI_API_KEY"], model="gemini-3.6-flash"
     )
     health = await GeminiProvider(config).health_check()
     assert health.status == "ok"
