@@ -101,7 +101,7 @@ def test_agent_proposal_to_task_manager(db_session: Session):
     # 1. Agent -> proposal -> central validation -> TaskManager
     created_task_id = orch.propose_plan(agent.agent_id, plan_dict)
     
-    task = tm.get(created_task_id, session_id="session_1")
+    task = tm.get(created_task_id, session_id="session_1", principal_id="user_1")
     assert task is not None
     assert task.description == "Send an email"
     assert "email_send" in task.tools_requested

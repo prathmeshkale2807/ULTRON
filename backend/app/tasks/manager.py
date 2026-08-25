@@ -119,19 +119,20 @@ class TaskManager:
         logger.info("Task created task_id=%s session=%s priority=%s", task_id, session_id, priority.value)
         return row
 
-    def get(self, task_id: str, *, session_id: str | None) -> TaskRecord:
+    def get(self, task_id: str, *, session_id: str | None, principal_id: str) -> TaskRecord:
         """Fetch a task, enforcing ownership. Raises TaskNotFoundError or OwnershipError."""
         row = self.db.get(TaskRecord, task_id)
         if row is None:
             raise TaskNotFoundError(f"task {task_id!r} not found")
-        self._check_ownership(row, session_id)
+        self._check_ownership(row, session_id, principal_id)
         return row
 
-    def list_tasks(self, *, session_id: str | None) -> list[TaskRecord]:
-        """Return all tasks belonging to the given session, newest first."""
+    def list_tasks(self, *, session_id: str | None, principal_id: str) -> list[TaskRecord]:
+        """Return all tasks belonging to the given session and principal, newest first."""
         rows = (
             self.db.query(TaskRecord)
             .filter(TaskRecord.session_id == session_id)
+            .filter(TaskRecord.principal_id == principal_id)
             .order_by(TaskRecord.created_at.desc())
             .all()
         )
@@ -142,6 +143,7 @@ class TaskManager:
         task_id: str,
         *,
         session_id: str | None,
+        principal_id: str,
         actor: str,
     ) -> TaskRecord:
         """Request cancellation of a task.
@@ -152,7 +154,7 @@ class TaskManager:
         global worker registry). The worker transitions to CANCELLED when it
         next checks the token.
         """
-        row = self.get(task_id, session_id=session_id)
+        row = self.get(task_id, session_id=session_id, principal_id=principal_id)
         current = TaskState(row.state)
 
         if current in TERMINAL_STATES:
@@ -189,9 +191,9 @@ class TaskManager:
         logger.info("Task cancel requested task_id=%s from=%s actor=%s", task_id, current.value, actor)
         return row
 
-    def pause(self, task_id: str, *, session_id: str | None, actor: str) -> TaskRecord:
+    def pause(self, task_id: str, *, session_id: str | None, principal_id: str, actor: str) -> TaskRecord:
         """Request a pause on a RUNNING task (cooperative between tool steps)."""
-        row = self.get(task_id, session_id=session_id)
+        row = self.get(task_id, session_id=session_id, principal_id=principal_id)
         current = TaskState(row.state)
         if current != TaskState.RUNNING:
             raise InvalidTransitionError(current, TaskState.PAUSED)
@@ -200,9 +202,9 @@ class TaskManager:
         self._audit.record(task_id=task_id, event="pause_requested", actor=actor)
         return row
 
-    def resume(self, task_id: str, *, session_id: str | None, actor: str) -> TaskRecord:
+    def resume(self, task_id: str, *, session_id: str | None, principal_id: str, actor: str) -> TaskRecord:
         """Resume a PAUSED task."""
-        row = self.get(task_id, session_id=session_id)
+        row = self.get(task_id, session_id=session_id, principal_id=principal_id)
         current = TaskState(row.state)
         if current != TaskState.PAUSED:
             raise InvalidTransitionError(current, TaskState.RUNNING)
@@ -268,25 +270,30 @@ class TaskManager:
         logger.warning("Emergency stop: signalled cancellation for %d tasks", count)
         return count
 
-    def get_audit_history(self, task_id: str, *, session_id: str | None) -> list[TaskAuditEntry]:
+    def get_audit_history(self, task_id: str, *, session_id: str | None, principal_id: str) -> list[TaskAuditEntry]:
         """Return audit history for a task (ownership-gated)."""
-        self.get(task_id, session_id=session_id)  # ownership check
-        return (
+        self.get(task_id, session_id=session_id, principal_id=principal_id)  # ownership check
+        rows = (
             self.db.query(TaskAuditEntry)
             .filter(TaskAuditEntry.task_id == task_id)
-            .order_by(TaskAuditEntry.timestamp.asc())
+            .order_by(TaskAuditEntry.timestamp.asc(), TaskAuditEntry.id.asc())
             .all()
         )
+        return rows
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
 
-    def _check_ownership(self, row: TaskRecord, session_id: str | None) -> None:
-        """Raise OwnershipError if the task does not belong to session_id."""
+    def _check_ownership(self, row: TaskRecord, session_id: str | None, principal_id: str) -> None:
+        """Raise OwnershipError if the task does not belong to session_id and principal."""
         if row.session_id != session_id:
             raise OwnershipError(
                 f"task {row.task_id!r} belongs to a different session"
+            )
+        if row.principal_id != principal_id:
+            raise OwnershipError(
+                f"task {row.task_id!r} belongs to a different principal"
             )
 
     def _transition(

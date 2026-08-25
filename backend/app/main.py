@@ -127,7 +127,7 @@ app.add_middleware(
         "http://localhost:5173",  # Vite dev server fallback
     ],
     allow_credentials=True,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 

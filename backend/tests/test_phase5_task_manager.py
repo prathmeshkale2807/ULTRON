@@ -327,7 +327,7 @@ def test_create_task_tools_stored_as_json(manager) -> None:
 
 def test_get_task_own_session(manager) -> None:
     row = manager.create(session_id="sess-A", description="mine")
-    fetched = manager.get(row.task_id, session_id="sess-A")
+    fetched = manager.get(row.task_id, session_id="sess-A", principal_id="local")
     assert fetched.task_id == row.task_id
 
 
@@ -336,14 +336,14 @@ def test_get_task_wrong_session_raises_ownership_error(manager) -> None:
 
     row = manager.create(session_id="sess-A", description="mine")
     with pytest.raises(OwnershipError):
-        manager.get(row.task_id, session_id="sess-B")
+        manager.get(row.task_id, session_id="sess-B", principal_id="local")
 
 
 def test_get_nonexistent_task_raises_not_found(manager) -> None:
     from app.tasks.manager import TaskNotFoundError
 
     with pytest.raises(TaskNotFoundError):
-        manager.get("no-such-id", session_id="sess-A")
+        manager.get("no-such-id", session_id="sess-A", principal_id="local")
 
 
 def test_list_tasks_returns_own_session_only(manager) -> None:
@@ -351,8 +351,8 @@ def test_list_tasks_returns_own_session_only(manager) -> None:
     manager.create(session_id="sess-A", description="task A2")
     manager.create(session_id="sess-B", description="task B1")
 
-    rows_a = manager.list_tasks(session_id="sess-A")
-    rows_b = manager.list_tasks(session_id="sess-B")
+    rows_a = manager.list_tasks(session_id="sess-A", principal_id="local")
+    rows_b = manager.list_tasks(session_id="sess-B", principal_id="local")
     assert len(rows_a) == 2
     assert len(rows_b) == 1
     assert all(r.session_id == "sess-A" for r in rows_a)
@@ -430,7 +430,7 @@ def test_cancel_queued_task_transitions_to_cancelled(manager) -> None:
     from app.tasks.models import TaskState
 
     row = manager.create(session_id="sess-X", description="cancel me")
-    result = manager.cancel(row.task_id, session_id="sess-X", actor="local")
+    result = manager.cancel(row.task_id, session_id="sess-X", principal_id="local", actor="local")
     assert result.state == TaskState.CANCELLED.value
 
 
@@ -444,7 +444,7 @@ def test_cancel_already_terminal_task_is_noop(manager) -> None:
     manager.transition_state(row.task_id, TaskState.COMPLETED)
 
     # Cancel of a completed task should return the task without error.
-    result = manager.cancel(row.task_id, session_id="sess-X", actor="local")
+    result = manager.cancel(row.task_id, session_id="sess-X", principal_id="local", actor="local")
     assert result.state == TaskState.COMPLETED.value
 
 
@@ -453,7 +453,7 @@ def test_cancel_wrong_session_raises_ownership_error(manager) -> None:
 
     row = manager.create(session_id="sess-A", description="d")
     with pytest.raises(OwnershipError):
-        manager.cancel(row.task_id, session_id="sess-B", actor="local")
+        manager.cancel(row.task_id, session_id="sess-B", principal_id="local", actor="local")
 
 
 def test_cancel_running_task_sets_cancellation_requested_at(manager) -> None:
@@ -462,7 +462,7 @@ def test_cancel_running_task_sets_cancellation_requested_at(manager) -> None:
     row = manager.create(session_id="sess-Y", description="running task")
     manager.transition_state(row.task_id, TaskState.PLANNING)
     manager.transition_state(row.task_id, TaskState.RUNNING)
-    result = manager.cancel(row.task_id, session_id="sess-Y", actor="local")
+    result = manager.cancel(row.task_id, session_id="sess-Y", principal_id="local", actor="local")
     # State stays RUNNING (cooperative cancel) but timestamp is set.
     assert result.cancellation_requested_at is not None
 
@@ -479,7 +479,7 @@ def test_cancel_running_task_signals_cancellation_token(manager, db_session) -> 
     register_token(row.task_id, token)
     assert not token.is_cancel_requested()
 
-    manager.cancel(row.task_id, session_id="sess-Z", actor="local")
+    manager.cancel(row.task_id, session_id="sess-Z", principal_id="local", actor="local")
     assert token.is_cancel_requested()
 
 
@@ -497,8 +497,8 @@ def test_cancel_all_running_cancels_queued_tasks(manager) -> None:
     count = manager.cancel_all_running(reason="emergency_stop")
     assert count == 2
 
-    r1 = manager.get(t1.task_id, session_id="s")
-    r2 = manager.get(t2.task_id, session_id="s")
+    r1 = manager.get(t1.task_id, session_id="s", principal_id="local")
+    r2 = manager.get(t2.task_id, session_id="s", principal_id="local")
     assert r1.state == TaskState.CANCELLED.value
     assert r2.state == TaskState.CANCELLED.value
 
@@ -558,7 +558,7 @@ def test_get_audit_history_returns_events_in_order(manager, db_session) -> None:
     manager.transition_state(row.task_id, TaskState.PLANNING)
     manager.transition_state(row.task_id, TaskState.RUNNING)
 
-    history = manager.get_audit_history(row.task_id, session_id="sess-H")
+    history = manager.get_audit_history(row.task_id, session_id="sess-H", principal_id="local")
     events = [e.event for e in history]
     assert "created" in events
     assert "state_change" in events
@@ -569,7 +569,7 @@ def test_get_audit_history_wrong_session_raises_ownership_error(manager) -> None
 
     row = manager.create(session_id="sess-A", description="d")
     with pytest.raises(OwnershipError):
-        manager.get_audit_history(row.task_id, session_id="sess-B")
+        manager.get_audit_history(row.task_id, session_id="sess-B", principal_id="local")
 
 
 # ---------------------------------------------------------------------------
@@ -589,7 +589,7 @@ def test_failed_task_does_not_affect_other_tasks(manager) -> None:
     manager.transition_state(bad.task_id, TaskState.FAILED, error_summary="crash")
 
     # Good task is unaffected
-    good_row = manager.get(good.task_id, session_id="s")
+    good_row = manager.get(good.task_id, session_id="s", principal_id="local")
     assert good_row.state == TaskState.QUEUED.value
 
 

@@ -6,11 +6,11 @@ from app.security.local_auth import require_local_auth
 from app.ai_providers.factory import get_provider_manager
 from app.conversation.manager import ConversationManager
 
-def _require_valid_session(session_id: str, db: Session) -> None:
+def _require_valid_session(session_id: str, db: Session, principal_id: str) -> None:
     from app.core.database import SessionRecord
     row = db.get(SessionRecord, session_id)
-    if not row or row.invalidated:
-        raise HTTPException(status_code=403, detail="Invalid or expired session")
+    if not row or row.invalidated or row.principal_id != principal_id:
+        raise HTTPException(status_code=403, detail="Invalid, expired, or unauthorized session")
 
 
 router = APIRouter(prefix="/conversations", tags=["conversations"])
@@ -23,14 +23,20 @@ async def post_message(
     db: Session = Depends(get_db),
     principal = Depends(require_local_auth)
 ):
-    _require_valid_session(session_id, db)
-    provider_manager = get_provider_manager()
-    manager = ConversationManager(db, provider_manager)
-    # Ensure conversation exists and ownership is valid
-    conv = manager.get_or_create(conversation_id, session_id)
-    if conv.session_id and conv.session_id != session_id:
-        raise HTTPException(status_code=403, detail="Not authorized to access this conversation.")
+    from fastapi.concurrency import run_in_threadpool
+    
+    def _sync_setup():
+        _require_valid_session(session_id, db, principal.identity)
+        provider_manager = get_provider_manager()
+        manager = ConversationManager(db, provider_manager)
+        # Ensure conversation exists and ownership is valid
+        conv = manager.get_or_create(conversation_id, session_id)
+        if conv.session_id and conv.session_id != session_id:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Not authorized to access this conversation.")
+        return manager
 
+    manager = await run_in_threadpool(_sync_setup)
         
     response_text = await manager.process_turn(
         conversation_id, 
@@ -40,8 +46,11 @@ async def post_message(
         message.metadata
     )
     
-    from app.core.database import MessageRecord
-    last_msg = db.query(MessageRecord).filter_by(conversation_id=conversation_id).order_by(MessageRecord.id.desc()).first()
+    def _sync_fetch_last():
+        from app.core.database import MessageRecord
+        return db.query(MessageRecord).filter_by(conversation_id=conversation_id).order_by(MessageRecord.id.desc()).first()
+        
+    last_msg = await run_in_threadpool(_sync_fetch_last)
     
     return last_msg
 

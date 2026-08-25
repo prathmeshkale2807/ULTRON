@@ -132,16 +132,21 @@ async def create_task(
     principal: Principal = Depends(require_local_auth),
 ) -> TaskResponse:
     """Create a new task in QUEUED state and submit it to the worker pool."""
-    _require_valid_session(body.session_id, db, principal.identity)
-    manager = TaskManager(db)
-    row = manager.create(
-        session_id=body.session_id,
-        description=body.description,
-        priority=body.priority,
-        tools_requested=body.tools_requested,
-        actor=principal.identity,
-    )
-    # Submit to worker asynchronously — non-blocking.
+    from fastapi.concurrency import run_in_threadpool
+
+    def _sync_create():
+        _require_valid_session(body.session_id, db, principal.identity)
+        manager = TaskManager(db)
+        return manager.create(
+            session_id=body.session_id,
+            description=body.description,
+            priority=body.priority,
+            tools_requested=body.tools_requested,
+            actor=principal.identity,
+        )
+
+    row = await run_in_threadpool(_sync_create)
+    # Submit to worker asynchronously - non-blocking.
     worker = get_task_worker()
     await worker.submit(row.task_id, body.priority)
     return TaskResponse.from_record(row)
@@ -155,7 +160,7 @@ def list_tasks(
 ) -> list[TaskResponse]:
     """List all tasks for the given session."""
     manager = TaskManager(db)
-    rows = manager.list_tasks(session_id=session_id)
+    rows = manager.list_tasks(session_id=session_id, principal_id=principal.identity)
     return [TaskResponse.from_record(r) for r in rows]
 
 
@@ -168,7 +173,7 @@ def get_task(
 ) -> TaskResponse:
     manager = TaskManager(db)
     try:
-        row = manager.get(task_id, session_id=session_id)
+        row = manager.get(task_id, session_id=session_id, principal_id=principal.identity)
     except TaskNotFoundError:
         raise HTTPException(status_code=404, detail="task not found")
     except OwnershipError:
@@ -185,7 +190,7 @@ def cancel_task(
 ) -> TaskResponse:
     manager = TaskManager(db)
     try:
-        row = manager.cancel(task_id, session_id=session_id, actor=principal.identity)
+        row = manager.cancel(task_id, session_id=session_id, principal_id=principal.identity, actor=principal.identity)
     except TaskNotFoundError:
         raise HTTPException(status_code=404, detail="task not found")
     except OwnershipError:
@@ -202,7 +207,7 @@ def pause_task(
 ) -> TaskResponse:
     manager = TaskManager(db)
     try:
-        row = manager.pause(task_id, session_id=session_id, actor=principal.identity)
+        row = manager.pause(task_id, session_id=session_id, principal_id=principal.identity, actor=principal.identity)
     except TaskNotFoundError:
         raise HTTPException(status_code=404, detail="task not found")
     except OwnershipError:
@@ -221,7 +226,7 @@ def resume_task(
 ) -> TaskResponse:
     manager = TaskManager(db)
     try:
-        row = manager.resume(task_id, session_id=session_id, actor=principal.identity)
+        row = manager.resume(task_id, session_id=session_id, principal_id=principal.identity, actor=principal.identity)
     except TaskNotFoundError:
         raise HTTPException(status_code=404, detail="task not found")
     except OwnershipError:
@@ -232,7 +237,7 @@ def resume_task(
 
 
 @router.get("/{task_id}/history", response_model=list[TaskAuditResponse])
-def task_history(
+def get_task_history(
     task_id: str,
     session_id: str,
     db: Session = Depends(get_db),
@@ -240,9 +245,9 @@ def task_history(
 ) -> list[TaskAuditResponse]:
     manager = TaskManager(db)
     try:
-        entries = manager.get_audit_history(task_id, session_id=session_id)
+        rows = manager.get_audit_history(task_id, session_id=session_id, principal_id=principal.identity)
     except TaskNotFoundError:
         raise HTTPException(status_code=404, detail="task not found")
     except OwnershipError:
         raise HTTPException(status_code=403, detail="access denied")
-    return [TaskAuditResponse.from_entry(e) for e in entries]
+    return [TaskAuditResponse.from_entry(r) for r in rows]

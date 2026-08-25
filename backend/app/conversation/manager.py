@@ -1,3 +1,12 @@
+from fastapi.concurrency import run_in_threadpool
+import base64
+import asyncio
+from app.core.images import process_image
+from app.conversation.attachments import save_attachment, get_attachment
+from app.ai_providers.base import ContentPart
+from app.tasks.worker import get_task_worker
+from app.tasks.manager import _volatile_tool_results
+from app.core.database import TaskRecord
 import json
 from sqlalchemy.orm import Session
 from app.core.database import ConversationRecord, MessageRecord
@@ -57,124 +66,124 @@ class ConversationManager:
             history += f"{m.role.upper()}: {m.content}\n"
         return history
 
+    
     async def process_turn(self, conversation_id: str, user_text: str, session_id: str | None, principal_id: str, metadata: dict | None = None) -> str:
-        conv = self.get_or_create(conversation_id, session_id)
-        
-        # Process incoming attachments
-        stored_refs = []
-        if metadata and "attachments" in metadata:
-            import base64
-            from app.core.images import process_image
-            from app.conversation.attachments import save_attachment
+        from app.tools.registry import get_registry
+    
+        # --- Phase 1: Sync Context Prep ---
+        def _prepare_context():
+            conv = self.get_or_create(conversation_id, session_id)
             
-            raw_attachments = metadata.pop("attachments")
-            for att in raw_attachments:
-                try:
-                    data = base64.b64decode(att["data_base64"])
-                    mime, norm_data = process_image(data)
-                    record = save_attachment(
-                        db=self.db,
-                        principal_id=principal_id,
-                        conversation_id=conversation_id,
-                        mime_type=mime,
-                        data=norm_data
-                    )
-                    stored_refs.append({"attachment_id": record.attachment_id, "mime_type": mime})
-                except Exception as e:
-                    import logging
-                    logging.getLogger(__name__).warning(f"Failed to process attachment: {e}")
-                    
+            stored_refs = []
+            if metadata and "attachments" in metadata:
+                raw_attachments = metadata.pop("attachments")
+                for att in raw_attachments:
+                    try:
+                        data = base64.b64decode(att["data_base64"])
+                        mime, norm_data = process_image(data)
+                        record = save_attachment(
+                            db=self.db,
+                            principal_id=principal_id,
+                            conversation_id=conversation_id,
+                            mime_type=mime,
+                            data=norm_data
+                        )
+                        stored_refs.append({"attachment_id": record.attachment_id, "mime_type": mime})
+                    except Exception as e:
+                        logger.warning(f"Failed to process attachment: {e}")
+                        
             if stored_refs:
                 metadata["attachments"] = stored_refs
-                
-        msg = self.add_message(conversation_id, MessageRoleEnum.USER, user_text, metadata)
-        
-        # Update message_id on the saved attachments
-        if stored_refs:
-            from app.core.database import AttachmentRecord
-            from sqlalchemy import update
-            self.db.execute(
-                update(AttachmentRecord)
-                .where(AttachmentRecord.attachment_id.in_([r["attachment_id"] for r in stored_refs]))
-                .values(message_id=msg.id)
+    
+            msg = self.add_message(
+                conversation_id, 
+                MessageRoleEnum.USER, 
+                user_text,
+                metadata=metadata
             )
-            self.db.commit()
             
-        # Phase 9: Memory Retrieval
-        from app.memory.store import MemoryStore
-        memory_store = MemoryStore(self.db, principal_id)
-        
-        # A lightweight relevance heuristic for search query:
-        # In a real system, we'd use embeddings. For now, we search words or just get top 5 overall.
-        memories = memory_store.search(limit=5, session_id=session_id)
-        memory_context = "User Memory Context:\n"
-        
-        # Determine maximum sensitivity required for the AI call
-        max_sensitivity = "INTERNAL"
-        sensitivity_levels = {"PUBLIC": 0, "INTERNAL": 1, "SENSITIVE": 2, "PRIVATE": 3}
-        current_max = 1
-        
-        if memories:
-            for mem in memories:
-                memory_context += f"- [{mem.source_type.value}] ({mem.sensitivity.value}): {mem.content}\n"
-                level = sensitivity_levels.get(mem.sensitivity.value, 1)
-                if level > current_max:
-                    current_max = level
-                    max_sensitivity = mem.sensitivity.value
-        else:
-            memory_context += "None\n"
-        
-        # 1. Extract Intent
-        history = self.get_history(conversation_id)
-        
-        # We append memory_context to history so intent and planner see it
-        enriched_history = f"{memory_context}\nConversation History:\n{history}"
-        
-        from app.ai_providers.base import ContentPart
-        if stored_refs:
-            from app.conversation.attachments import get_attachment
-            parts = [ContentPart(type="text", text=user_text)]
-            for ref in stored_refs:
-                try:
-                    _, data = get_attachment(self.db, ref["attachment_id"], principal_id)
-                    parts.append(ContentPart(type="image", mime_type=ref["mime_type"], data=data))
-                except Exception as e:
-                    pass
-            current_message = parts
-        else:
+            # Update message_id on the saved attachments
+            if stored_refs:
+                from app.core.database import AttachmentRecord
+                from sqlalchemy import update
+                self.db.execute(
+                    update(AttachmentRecord)
+                    .where(AttachmentRecord.attachment_id.in_([r["attachment_id"] for r in stored_refs]))
+                    .values(message_id=msg.id)
+                )
+                self.db.commit()
+    
+            memory_store = MemoryStore(self.db, principal_id)
+            memories = memory_store.search(limit=5, session_id=session_id)
+            memory_context = "User Memory Context:\n"
+            
+            max_sensitivity = "INTERNAL"
+            sensitivity_levels = {"PUBLIC": 0, "INTERNAL": 1, "SENSITIVE": 2, "PRIVATE": 3}
+            current_max = 1
+            
+            if memories:
+                for mem in memories:
+                    memory_context += f"- [{mem.source_type.value}] ({mem.sensitivity.value}): {mem.content}\n"
+                    level = sensitivity_levels.get(mem.sensitivity.value, 1)
+                    if level > current_max:
+                        current_max = level
+                        max_sensitivity = mem.sensitivity.value
+            else:
+                memory_context += "None\n"
+                
+            history = self.get_history(conversation_id)
+            enriched_history = f"{memory_context}\nConversation History:\n{history}"
+            
             current_message = user_text
+            if stored_refs:
+                parts = [ContentPart(type="text", text=user_text)]
+                for ref in stored_refs:
+                    try:
+                        _, data = get_attachment(self.db, ref["attachment_id"], principal_id)
+                        parts.append(ContentPart(type="image", mime_type=ref["mime_type"], data=data))
+                    except Exception:
+                        pass
+                current_message = parts
+                
+            return conv.active_task_id, enriched_history, current_message, max_sensitivity
+            
+        active_task_id, enriched_history, current_message, max_sensitivity = await run_in_threadpool(_prepare_context)
         
         intent = await extract_intent(self.provider, current_message, enriched_history, sensitivity=max_sensitivity)
         
-        # 2. Check Cancellation
+        # --- Phase 2: Intent Handling ---
         if intent.intent_type == "CANCELLATION":
-            if conv.active_task_id:
-                self.task_manager.cancel(conv.active_task_id, session_id=session_id)
-                conv.active_task_id = None
-                self.db.commit()
+            def _cancel_and_get_response():
+                if active_task_id:
+                    self.task_manager.cancel(active_task_id, session_id=session_id)
+                    conv = self.get_or_create(conversation_id, session_id)
+                    conv.active_task_id = None
+                    self.db.commit()
+            await run_in_threadpool(_cancel_and_get_response)
+            
             response_text = await generate_response(self.provider, "User cancelled the ongoing task.", "Task cancelled successfully.", sensitivity=max_sensitivity)
-            self.add_message(conversation_id, MessageRoleEnum.ASSISTANT, response_text)
+            await run_in_threadpool(self.add_message, conversation_id, MessageRoleEnum.ASSISTANT, response_text)
             return response_text
             
-        # 3. Check Confidence / Clarification
         if intent.confidence in ["Low", "Medium"] and intent.clarification_needed:
             response_text = await generate_response(self.provider, f"Clarification needed: {intent.clarification_needed}", "", sensitivity=max_sensitivity)
-            self.add_message(conversation_id, MessageRoleEnum.ASSISTANT, response_text)
+            await run_in_threadpool(self.add_message, conversation_id, MessageRoleEnum.ASSISTANT, response_text)
             return response_text
             
-        # 4. Plan if action
         if intent.intent_type in ["TOOL_ACTION", "MULTI_STEP_TASK"]:
-            if conv.active_task_id:
-                try:
-                    # Cancel the stale/superseded task before starting a new one
-                    old_task = self.task_manager.get(conv.active_task_id, session_id=session_id)
-                    if old_task and old_task.state not in ["completed", "failed", "cancelled"]:
-                        self.task_manager.cancel(conv.active_task_id, session_id=session_id)
-                except Exception:
-                    pass
-                conv.active_task_id = None
-                self.db.commit()
-
+            def _cleanup_old_task():
+                if active_task_id:
+                    try:
+                        old_task = self.task_manager.get(active_task_id, session_id=session_id)
+                        if old_task and old_task.state not in ["completed", "failed", "cancelled"]:
+                            self.task_manager.cancel(active_task_id, session_id=session_id)
+                    except Exception:
+                        pass
+                    conv = self.get_or_create(conversation_id, session_id)
+                    conv.active_task_id = None
+                    self.db.commit()
+            await run_in_threadpool(_cleanup_old_task)
+    
             registry = get_registry()
             tools_schema = json.dumps([{t.name: t.description} for t in registry.list_tools()])
             try:
@@ -185,42 +194,43 @@ class ConversationManager:
             if not plan or not plan.steps:
                 return "I couldn't figure out how to do that."
                 
-            # Submit to task manager
-            tools_payload = []
-            for step in plan.steps:
-                tools_payload.append({
-                    "tool_name": step.tool_name,
-                    "arguments": step.arguments,
-                    "target_device": step.target_device
-                })
+            tools_payload = [{"tool_name": s.tool_name, "arguments": s.arguments, "target_device": s.target_device} for s in plan.steps]
+            
+            def _create_task():
+                t = self.task_manager.create(
+                    session_id=session_id,
+                    description=plan.objective,
+                    tools_requested=tools_payload
+                )
+                conv = self.get_or_create(conversation_id, session_id)
+                conv.active_task_id = t.task_id
+                self.db.commit()
+                return t.task_id
                 
-            task = self.task_manager.create(
-                session_id=session_id,
-                description=plan.objective,
-                tools_requested=tools_payload
-            )
+            new_task_id = await run_in_threadpool(_create_task)
+            await get_task_worker().submit(new_task_id)
             
-            from app.tasks.worker import get_task_worker
-            await get_task_worker().submit(task.task_id)
-            
-            conv.active_task_id = task.task_id
-            self.db.commit()
-            
-            import asyncio
+            # Async polling using threadpool to prevent blocking the event loop
+            task_state = "queued"
+            task_error = None
             for _ in range(20):
-                self.db.refresh(task)
-                if task.state in ["completed", "failed", "cancelled"]:
+                def _check_status():
+                    t = self.db.get(TaskRecord, new_task_id)
+                    return getattr(t, "state", "unknown"), getattr(t, "error_summary", None)
+                task_state, task_error = await run_in_threadpool(_check_status)
+                if task_state in ["completed", "failed", "cancelled"]:
                     break
                 await asyncio.sleep(0.1)
                 
-            history_entries = self.task_manager.get_audit_history(task.task_id, session_id=session_id)
+            def _get_history_and_results():
+                history_entries = self.task_manager.get_audit_history(new_task_id, session_id=session_id, principal_id=principal_id)
+                volatile_results = _volatile_tool_results.pop(new_task_id, [])
+                return history_entries, volatile_results
+                
+            history_entries, volatile_results = await run_in_threadpool(_get_history_and_results)
+            
             exec_results = ""
             visual_context = []
-            
-            from app.tasks.manager import _volatile_tool_results
-            volatile_results = _volatile_tool_results.pop(task.task_id, [])
-            
-            import base64
             for e in history_entries:
                 try:
                     detail_data = json.loads(e.detail)
@@ -240,24 +250,25 @@ class ConversationManager:
                 exec_results += f"Tool {res.get('tool_name')} result: {json.dumps(out)}\n"
                     
             if not exec_results.strip():
-                exec_results = f"Task finished with state: {task.state}"
-                if task.error_summary:
-                    exec_results += f" Error: {task.error_summary}"
+                exec_results = f"Task finished with state: {task_state}"
+                if task_error:
+                    exec_results += f" Error: {task_error}"
             
             response_text = await generate_response(
                 self.provider, 
-                f"Planned task {task.task_id} with objective: {plan.objective} finished with state {task.state}.", 
+                f"Planned task {new_task_id} with objective: {plan.objective} finished with state {task_state}.", 
                 exec_results, 
                 sensitivity=max_sensitivity,
                 visual_context=visual_context if visual_context else None
             )
-            self.add_message(conversation_id, MessageRoleEnum.ASSISTANT, response_text)
+            await run_in_threadpool(self.add_message, conversation_id, MessageRoleEnum.ASSISTANT, response_text)
+            from app.conversation.manager import _trigger_memory_extraction
             _trigger_memory_extraction(self.provider, user_text, response_text, principal_id, self.db, session_id)
             return response_text
             
-        # 5. General conversation response
         response_text = await generate_response(self.provider, f"User asked a general question or conversational intent: {intent.requested_outcome}", "No tools executed.", sensitivity=max_sensitivity)
-        self.add_message(conversation_id, MessageRoleEnum.ASSISTANT, response_text)
+        await run_in_threadpool(self.add_message, conversation_id, MessageRoleEnum.ASSISTANT, response_text)
+        from app.conversation.manager import _trigger_memory_extraction
         _trigger_memory_extraction(self.provider, user_text, response_text, principal_id, self.db, session_id)
         return response_text
-
+    
