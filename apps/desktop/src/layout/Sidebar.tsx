@@ -1,8 +1,23 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { NavLink } from 'react-router-dom';
-import { MessageSquare, Shield, Smartphone, Activity } from 'lucide-react';
+import { MessageSquare, Shield, Smartphone, Activity, Mic } from 'lucide-react';
+import { apiClient } from '../api/client';
 
 export function Sidebar() {
+  const [voiceStatus, setVoiceStatus] = useState<string>('STANDBY');
+
+  useEffect(() => {
+    let mounted = true;
+    apiClient<{ status: string; active_session?: { state: string } }>('/api/voice/status')
+      .then((data) => {
+        if (mounted && data) {
+          setVoiceStatus(data.active_session?.state || 'STANDBY');
+        }
+      })
+      .catch(() => {});
+    return () => { mounted = false; };
+  }, []);
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -22,6 +37,10 @@ export function Sidebar() {
           <Shield size={18} /> Security
         </NavLink>
       </nav>
+      <div style={{ padding: '0.75rem 1rem', borderTop: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.85rem', color: 'var(--color-text-sub)' }}>
+        <Mic size={16} style={{ color: voiceStatus === 'LISTENING' ? '#3b82f6' : voiceStatus === 'SPEAKING' ? '#8b5cf6' : '#10b981' }} />
+        <span>Voice: {voiceStatus}</span>
+      </div>
     </aside>
   );
 }

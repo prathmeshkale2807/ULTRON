@@ -154,12 +154,20 @@ Completed phases are frozen baselines. Future phases must preserve prior securit
 **Goal**: Optimization for latency, concurrent scaling, and resource efficiency.
 **Delivered**: SQLite WAL mode (`PRAGMA journal_mode=WAL`), `PRAGMA synchronous=NORMAL`, `PRAGMA busy_timeout=5000`, WAL permission syncing. `TaskWorker` with bounded asyncio priority queue (max 1000), semaphore-capped concurrency (max 16), `run_in_threadpool` for all DB-blocking calls in `ConversationManager`.
 
-### Phase 27: Final Production Security Audit
+### Phase 28: JARVIS Terminal / Autonomous CLI Experience
 **Status**: SHIPPED
-**Goal**: Ultimate production-grade security, penetration testing, and trust boundary validation.
-**Delivered**: Windows ACL enforcement via `icacls` on ULTRON data directory at startup. SSRF DNS-resolution checks with private-IP blocking. Browser network policy (`allow_local_network_browser`). Input sanitization (`normalize_actor`). One-time short-lived WebSocket connection tickets for Voice and Devices. `test_phase27_ssrf.py` and `test_phase27_windows_acl.py` added to regression suite.
-**Final Test Baseline**: 329 passed, 0 failed, 3 skipped (backend) + 3 passed, 0 failed (frontend)
+**Goal**: Single-command headless/terminal assistant experience directly from VS Code or PowerShell.
+**Delivered**: `.\ultron.ps1` unified launcher with process detection and isolated cleanup, `app.cli.main` interactive terminal with live status, session management, confirmation prompts, and full routing through the ULTRON conversation pipeline. `test_phase28_cli.py` added to regression suite.
 
-**Residual Known Risk**: DNS-rebinding TOCTOU — `validate_url_safe()` resolves the hostname once at validation time, but Playwright navigates independently. A DNS rebinding attack could serve a public IP at validation time and switch to a private IP when Playwright connects. Mitigation: Playwright's own route interception blocks private-range connections and redirects at the browser level, reducing practical exploitability but not eliminating the race without local proxy IP pinning.
+### Phase 29: ULTRON JARVIS-Style Voice Assistant
+**Status**: SHIPPED
+**Goal**: Movie-style JARVIS voice assistant experience with single-wake-word activation and continuous active conversation.
+**Delivered**: `VoiceSession` full-duplex engine with state machine (`STANDBY`, `WAKE_DETECTED`, `LISTENING`, `PROCESSING`, `SPEAKING`, `INTERRUPTING`), wake-word activation ("Hey ULTRON" / "ULTRON"), follow-up commands without repeated wake words, automatic return to listening, watchdog inactivity timeout (`VOICE_CONVERSATION_TIMEOUT_SECONDS = 15.0s`), natural voice confirmation and cancellation via `ConfirmationBroker`, push-to-talk fallback, CLI voice mode, and desktop sidebar voice indicator. `test_phase29_voice_assistant.py` added to regression suite.
+
+### Phase 30: One-Command JARVIS Experience for ULTRON
+**Status**: SHIPPED
+**Goal**: Single-command startup (`.\ultron.ps1`) providing live hardware checks (microphone/speaker via `winmm.dll`), local Windows SAPI TTS playback, continuous voice conversation without wake word repetitions, real-time inactivity watchdog timeouts, spoken confirmation resolution, and strict single-PID safe teardown.
+**Delivered**: `audio_device.py` native winmm device inspection, `LocalWindowsTTSProvider` with background daemon thread audio synthesis, `/api/voice/status` hardware reflection, unified interactive CLI startup dashboard, spoken greetings, wake-word activation, continuous conversation mode, watchdog inactivity worker, voice confirmation, and emergency stop. `test_phase30_jarvis_experience.py` added to regression suite (16 tests, 390 total backend tests passing).
 
 </details>
+

@@ -61,7 +61,9 @@ def get_conversation(
     db: Session = Depends(get_db),
     principal = Depends(require_local_auth)
 ):
-    _require_valid_session(session_id, db)
+    # Phase 27 ownership check: must pass principal.identity so the session
+    # ownership validation enforces row.principal_id == principal.identity.
+    _require_valid_session(session_id, db, principal.identity)
     from app.core.database import ConversationRecord
     conv = db.get(ConversationRecord, conversation_id)
     if not conv:

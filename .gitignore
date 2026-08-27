@@ -8,6 +8,14 @@ backend/data/
 *.db
 *.sqlite
 *.sqlite3
+*.db-shm
+*.db-wal
+data/
+scratch/
+temp_extract/
+backend/scratch_tts.py
+backend/test_out.wav
+backend/test_sapi.py
 
 # Env / secrets
 .env

@@ -1,144 +1,150 @@
-# ULTRON — Phase 1: Project Scaffolding
+# ULTRON
 
-Personal AI assistant, built phase-by-phase per the approved architecture.
-This phase contains **real infrastructure only** — no PC control, no
-Android control, no AI calls, no voice yet. Every component either works
-for real or is explicitly reported as `not_implemented`; nothing is faked.
+## Personal AI Assistant — Production-Hardened Windows Platform
 
-## What exists in Phase 1
+ULTRON is a local-first personal AI assistant designed to provide intelligent
+conversation, automation, device control, browser interaction, voice
+interaction, memory, scheduling, and multi-agent orchestration while
+maintaining a strict security boundary around every executable action.
 
-- **Backend** (`backend/`): Python + FastAPI service. Real SQLite database,
-  real logging, one real endpoint (`/api/health`) that proves the database
-  round-trip works and honestly reports which components don't exist yet.
-- **Desktop shell** (`apps/desktop/`): Tauri + React. Polls the backend's
-  health endpoint and renders the real response — connected/unreachable
-  state is genuine, not simulated.
-- **Tests** (`backend/tests/`): exercise the real app + real temp database
-  via FastAPI's TestClient.
+The project is implemented phase-by-phase with security, verification,
+observability, and regression testing treated as first-class requirements.
 
-## What exists in Phase 2 (adds to Phase 1)
+---
 
-- **AI Provider Manager** (`backend/app/ai_providers/`): real Claude and
-  Gemini adapters behind one `AIProvider` interface. Adding OpenAI or a
-  local model later means writing one new adapter class -- no changes to
-  the manager or (later) the orchestrator.
-- Sensitivity-gated routing: every request carries a `Sensitivity` level
-  (PUBLIC/INTERNAL/SENSITIVE/PRIVATE). A provider is only ever used for a
-  request if explicitly authorized for that level -- see
-  `AI_*_AUTHORIZED_SENSITIVITIES` in `.env.example`. Fallback is only
-  attempted if the fallback provider is *also* authorized; otherwise the
-  request fails rather than silently using an unauthorized provider.
-- Timeout + retry (exponential backoff) per provider, then fallback.
-- `/api/health` now reports real Claude/Gemini status (`ok` /
-  `unauthenticated` / `unreachable` / `not_configured`) via a live API
-  call, cached for 60s to avoid hitting provider APIs on every poll.
+## Current Status
 
-**No orchestrator or real tool execution yet** -- Phase 2 is the provider
-layer only, exercised directly by tests and the health endpoint.
+### Phase 1–19 — MVP
+**SHIPPED**
 
-## Configuring AI providers
+### Phase 21–27 — Advanced / Production Hardening
+**COMPLETED**
 
-Copy `.env.example` to `.env` and set at least one of `ANTHROPIC_API_KEY`
-/ `GEMINI_API_KEY`. Full variable reference is documented inline in
-`.env.example`. Restart the backend after changing `.env`.
+### Phase 28 — JARVIS Terminal / Autonomous CLI Experience
+**COMPLETED**
 
-## Prerequisites (Windows)
+- Single-command interactive JARVIS terminal launcher (`.\ultron.ps1`)
+- Automatic backend lifecycle management with safe PID tracking and clean shutdown
+- Interactive ANSI status dashboard displaying live backend component health
+- Authenticated session management via `X-ULTRON-AUTH` and `SessionManager`
+- Real-time confirmation broker polling and interactive CLI approval prompts
+- Full preservation of existing security boundaries (ALWAYS_ASK, CRITICAL, SafetyGate, AuditLogger)
+- Zero bypass or direct tool execution: all CLI turns route through the standard REST conversation pipeline
 
-Install these first:
+### Phase 29 — ULTRON JARVIS-Style Voice Assistant
+**COMPLETED**
 
-1. **Python 3.12+** — https://www.python.org/downloads/ (check "Add to PATH")
-2. **Node.js 20+ LTS** — https://nodejs.org/
-3. **Rust toolchain** (required by Tauri) — https://rustup.rs/
-   - After installing, restart your terminal and run `rustc --version` to confirm.
-4. **Visual Studio Build Tools** (Tauri's Windows build dependency) —
-   install the "Desktop development with C++" workload from
-   https://visualstudio.microsoft.com/visual-cpp-build-tools/
-5. **WebView2** — usually already present on Windows 10/11; if not,
-   https://developer.microsoft.com/microsoft-edge/webview2/
+- Movie-style JARVIS voice assistant experience with single-wake-word activation ("Hey ULTRON" / "ULTRON")
+- Continuous Active Conversation: wake word is NOT required between follow-up commands once activated
+- Automatically transitions from speaking back to listening with watchdog inactivity timeout (`VOICE_CONVERSATION_TIMEOUT_SECONDS = 15.0s`)
+- Natural voice confirmation ("yes", "confirm", "go ahead") and rejection ("no", "cancel") resolving through `ConfirmationBroker`
+- Full-duplex voice interruption (barge-in cuts active TTS playback immediately)
+- Push-to-talk (`ptt`) fallback mode for seamless interaction without continuous microphone streaming
+- Integrated CLI voice mode (`ULTRON > voice`, `voice off`) and desktop sidebar voice indicator
+- 100% preservation of security pipeline: voice commands route strictly through `ConversationManager`, with no direct tool handler or LLM execution
 
-Verify each in **PowerShell**:
+---
+
+## Getting Started
+
+### JARVIS Terminal (Recommended)
+
+Launch the full interactive assistant experience with one command from the project root:
 
 ```powershell
-python --version
-node --version
-npm --version
-rustc --version
-cargo --version
+.\ultron.ps1
 ```
 
-## First-time setup
+This will automatically:
+1. Check if the ULTRON backend is already running on `http://127.0.0.1:8756`.
+2. Start the backend if not running and wait for health readiness.
+3. Authenticate using the local token abstraction.
+4. Establish a secure session and display the live system dashboard.
+5. Provide continuous conversational interaction.
+6. Cleanly invalidate the session and shut down only the launcher-spawned backend on exit.
 
-In **PowerShell**, from the repo root:
+### Development / Direct CLI
 
-```powershell
-Copy-Item backend\.env.example backend\.env
-# (Phase 1 doesn't need any real API keys yet — the defaults work as-is.)
-```
-
-## Running it
-
-Two terminals, both **PowerShell**, both from the repo root:
-
-**Terminal 1 — backend:**
-```powershell
-.\scripts\dev-backend.ps1
-```
-This creates a virtual environment, installs dependencies, and starts the
-API on `http://127.0.0.1:8756`. Visit `http://127.0.0.1:8756/api/health`
-in a browser to see the raw JSON.
-
-**Terminal 2 — desktop app:**
-```powershell
-.\scripts\dev-desktop.ps1
-```
-This installs frontend dependencies and opens the ULTRON window. It
-should show `connected` and list the database as `ok`, with everything
-else listed as `not_implemented`.
-
-## Running tests
-
-```powershell
-.\scripts\run-tests.ps1
-```
-
-## Database migrations
-
-Schema changes are owned by Alembic, not `create_all()`. `dev-backend.ps1`
-runs `alembic upgrade head` automatically before starting the server. To
-run it manually or create a new migration later:
+To run the CLI directly against an existing backend instance:
 
 ```powershell
 cd backend
-.venv\Scripts\Activate.ps1
-alembic upgrade head                          # apply migrations
-alembic revision --autogenerate -m "message"  # create a new one (future phases)
+.venv\Scripts\python.exe -m app.cli.main
 ```
 
-## Known limitation of this scaffold
+### Terminal Commands
 
-This code was written and syntax-checked in a Linux sandbox without
-network access or a Windows/Rust toolchain, so the FastAPI/SQLAlchemy
-dependency-level behavior and the Tauri build have **not** been runtime-
-verified end-to-end yet — only Python syntax-compiled. The commands above
-are the actual verification step; run them on your machine and treat the
-Phase 1 completion report's "known issues" section as provisional until
-you've done so. See `docs/PHASE_1_COMPLETION_REPORT.md`.
+Inside the ULTRON terminal:
+- `help` — Show available CLI commands.
+- `status` — Display live backend, database, AI provider, device, and session status.
+- `clear` — Clear the terminal screen and refresh the banner.
+- `exit` / `quit` / `shutdown` — Cleanly invalidate the session and exit.
+- Any other text — Processed as a natural-language request through the standard ULTRON agent pipeline.
 
-## Project structure
+---
 
-```
-ultron/
-├── apps/desktop/        # Tauri + React frontend
-├── backend/              # FastAPI core service
-│   ├── app/
-│   │   ├── api/          # HTTP routes
-│   │   └── core/         # config, logging, database
-│   └── tests/
-├── scripts/               # Windows PowerShell dev scripts
-└── docs/
-```
+The current architecture includes:
 
-Later phases add `backend/app/agents/`, `backend/app/tools/`,
-`backend/app/permissions/`, `backend/app/devices/`, `backend/app/voice/`,
-etc., per the approved architecture — deliberately not scaffolded yet so
-Phase 1 stays reviewable and doesn't contain empty placeholder modules.
+- AI provider management
+- Conversation engine
+- Tool registry and execution pipeline
+- Permission management
+- Safety Gate
+- Confirmation Broker
+- Audit logging
+- Emergency Stop
+- Task management and worker execution
+- Windows semantic UI automation
+- Browser automation with SSRF protection
+- Long-term memory
+- Gmail and Google Calendar integration
+- Android device pairing and automation
+- Voice STT/TTS pipeline
+- Wake-word and conversation mode
+- Full-duplex voice with barge-in
+- Scheduled automations
+- Multi-agent orchestration
+- Vision/multimodal capabilities
+- Performance and concurrency improvements
+- SQLite WAL configuration
+- Backpressure and resource limits
+- Final production security hardening
+
+---
+
+# Architecture
+
+ULTRON consists primarily of three layers:
+
+```text
+┌──────────────────────────────────────────────┐
+│              Desktop Application             │
+│        Tauri v2 + React + TypeScript         │
+└──────────────────────┬───────────────────────┘
+                       │
+                       │ Local HTTP / WebSocket
+                       ▼
+┌──────────────────────────────────────────────┐
+│                 FastAPI Backend               │
+│                                              │
+│  Authentication                              │
+│       ↓                                      │
+│  Conversation / Agent Orchestration          │
+│       ↓                                      │
+│  Tool Registry                               │
+│       ↓                                      │
+│  Permission Store                            │
+│       ↓                                      │
+│  Safety Gate                                 │
+│       ↓                                      │
+│  Confirmation Broker                         │
+│       ↓                                      │
+│  Tool Executor                               │
+│       ↓                                      │
+│  Verification                                │
+│       ↓                                      │
+│  Audit Log                                   │
+└──────────────────────┬───────────────────────┘
+                       │
+                       ▼
+              SQLite / Local Storage

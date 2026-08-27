@@ -1,26 +1,77 @@
 import json
 import asyncio
 import secrets
+import time
 from uuid import uuid4
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends
+from typing import Optional
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Header, HTTPException
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
+
+from app.core.config import get_settings
 from app.core.database import get_db
-from app.security.local_auth import get_or_create_local_token, _LOCAL_PRINCIPAL_IDENTITY
+from app.security.local_auth import get_or_create_local_token, _LOCAL_PRINCIPAL_IDENTITY, Principal, require_local_auth
 from app.devices.manager import DeviceManager, DeviceAuthError
 from app.voice.engine import VoiceSession
 from app.voice.models import VoiceConfig, AudioFormat
+from app.voice.assistant import get_active_voice_assistant
 
 router = APIRouter(prefix="/voice", tags=["voice"])
 
-import time
-from pydantic import BaseModel
-from fastapi import HTTPException, Header
-
 _voice_tickets = {}
+
 
 class VoiceTicketRequest(BaseModel):
     device_id: str | None = None
     credential: str | None = None
+
+
+class VoiceStatusResponse(BaseModel):
+    status: str
+    stt_configured: bool
+    tts_configured: bool
+    wake_word: str
+    timeout_seconds: float
+    microphone_available: bool = True
+    microphone_name: Optional[str] = None
+    speaker_available: bool = True
+    speaker_name: Optional[str] = None
+    active_session: Optional[dict] = None
+
+
+@router.get("/status", response_model=VoiceStatusResponse)
+def get_voice_status(
+    principal: Principal = Depends(require_local_auth),
+) -> VoiceStatusResponse:
+    import os
+    from app.voice.audio_device import get_microphone_info, get_speaker_info
+    from app.voice.tts_provider import is_tts_available
+
+    settings = get_settings()
+    stt_key = os.getenv("DEEPGRAM_API_KEY")
+    stt_ok = bool(stt_key and stt_key != "not_configured")
+
+    mic = get_microphone_info()
+    spk = get_speaker_info()
+    tts_ok = is_tts_available()
+
+    active_assistant = get_active_voice_assistant()
+    active_status = active_assistant.get_status() if active_assistant else None
+
+    return VoiceStatusResponse(
+        status="ok",
+        stt_configured=stt_ok,
+        tts_configured=tts_ok,
+        wake_word="Hey ULTRON",
+        timeout_seconds=settings.voice_conversation_timeout_seconds,
+        microphone_available=mic["available"],
+        microphone_name=mic["name"],
+        speaker_available=spk["available"],
+        speaker_name=spk["name"],
+        active_session=active_status,
+    )
+
 
 @router.post("/ticket")
 def create_voice_ticket(
@@ -50,6 +101,7 @@ def create_voice_ticket(
         "expires_at": time.time() + 30
     }
     return {"ticket": ticket}
+
 
 @router.websocket("/ws")
 async def voice_websocket(
