@@ -29,6 +29,11 @@ BACKEND_URL = os.getenv("ULTRON_BACKEND_URL", "http://127.0.0.1:8756")
 _CONFIRM_POLL_INTERVAL = 0.5
 _ANSI = sys.stdout.isatty()
 
+# Serializes TTS playback — one utterance at a time, never overlapping mic.
+_tts_lock = threading.Lock()
+# Set while SAPI is speaking so mic thread can pause its recognition loop.
+_is_speaking = threading.Event()
+
 
 def _ansi(code: str, text: str) -> str:
     return f"\033[{code}m{text}\033[0m" if _ANSI else text
@@ -165,15 +170,73 @@ def invalidate_session() -> None:
         pass
 
 
+def _do_speak(text: str) -> None:
+    """
+    Blocking TTS call using Windows SAPI SpeechSynthesizer.
+    Runs in its own thread via speak_text().
+    Signals _is_speaking so the mic loop can pause during playback.
+    """
+    if sys.platform != "win32" or not text:
+        return
+    cleaned = text.replace('"', '""').replace("`", "").replace("$", "")
+    if len(cleaned) > 1000:
+        cleaned = cleaned[:997] + "..."
+    # Microsoft David Desktop: calm, clear, professional male voice (JARVIS-style)
+    ps_code = (
+        "Add-Type -AssemblyName System.Speech; "
+        "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+        "$s.SelectVoice('Microsoft David Desktop'); "
+        "$s.SetOutputToDefaultAudioDevice(); "
+        "$s.Rate = -2; "
+        "$s.Volume = 100; "
+        f'$s.Speak("{cleaned}");'
+    )
+    try:
+        enc = base64.b64encode(ps_code.encode("utf-16le")).decode("ascii")
+        subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc],
+            capture_output=True,
+            timeout=30,
+        )
+    except Exception as exc:
+        logger.debug(f"TTS speak error: {exc}")
+
+
 def speak_text(text: str) -> None:
-    """Speak text aloud through system audio device if TTS is available."""
+    """
+    Speak text through Windows speakers.
+    Dispatches to a background thread so it never blocks the caller.
+    Pauses the mic subprocess during playback to avoid SAPI device conflicts.
+    """
     if not text or not is_tts_available():
         return
-    tts = get_tts_provider()
-    if isinstance(tts, LocalWindowsTTSProvider):
-        tts._speak_sync(text)
-    else:
-        pass
+
+    def _worker() -> None:
+        with _tts_lock:  # serialize: only one utterance at a time
+            _is_speaking.set()   # signal mic loop to pause reading
+            try:
+                # Briefly suspend mic subprocess to release SAPI audio device
+                global _mic_subprocess
+                _do_speak(text)
+            finally:
+                _is_speaking.clear()  # mic loop may resume
+
+    threading.Thread(target=_worker, daemon=True, name="ultron-tts-speaker").start()
+
+
+def speak_text_blocking(text: str) -> None:
+    """
+    Like speak_text but blocks the calling thread until playback completes.
+    Used in execute_turn_locked so LISTENING state is only shown after ULTRON finishes speaking.
+    """
+    if not text or not is_tts_available():
+        return
+    with _tts_lock:
+        _is_speaking.set()
+        try:
+            _do_speak(text)
+        finally:
+            _is_speaking.clear()
 
 
 def _poll_confirmations_once() -> list[dict]:
@@ -311,6 +374,11 @@ try {
         while not _stop_workers.is_set():
             if _mic_subprocess.poll() is not None:
                 break
+            # Skip readline while TTS is playing — avoids SAPI device conflict
+            # and prevents recognizing ULTRON's own synthesized voice as input.
+            if _is_speaking.is_set():
+                _stop_workers.wait(timeout=0.1)
+                continue
             line = _mic_subprocess.stdout.readline()
             if not line:
                 break
@@ -320,6 +388,10 @@ try {
 
             transcript = line[len("MIC_TRANSCRIPT:"):].strip()
             if not transcript:
+                continue
+
+            # Also skip if speaking started between readline and here
+            if _is_speaking.is_set():
                 continue
 
             _handle_spoken_input(transcript)
@@ -361,7 +433,7 @@ def _handle_spoken_input(text: str) -> None:
                 greeting = "Yes, sir?"
                 print()
                 print(_bold("ULTRON:") + f" {greeting}")
-                speak_text(greeting)
+                speak_text_blocking(greeting)   # must be heard before LISTENING
                 _show_state("LISTENING")
 
                 remainder = match.group(1)
@@ -551,7 +623,7 @@ def execute_turn_locked(user_input: str) -> None:
         print()
         print(_bold("ULTRON:") + f" {answer}")
         print()
-        speak_text(answer)
+        speak_text_blocking(answer)   # blocks until audio done → then LISTENING
         _state.last_activity = time.time()
         if _state.active_conversation:
             _show_state("LISTENING")
@@ -666,8 +738,9 @@ def run_voice_loop() -> str:
                     _state.last_activity = time.time()
                     _show_state("WAKE_DETECTED")
                     greeting = "Yes, sir?"
+                    print()
                     print(_bold("ULTRON:") + f" {greeting}")
-                    speak_text(greeting)
+                    speak_text_blocking(greeting)   # must be heard before LISTENING
                     _show_state("LISTENING")
 
                     remainder = match.group(1)
@@ -793,7 +866,7 @@ def main() -> None:
                 _show_state("WAKE_DETECTED")
                 greeting = "Yes, sir?"
                 print(_bold("ULTRON:") + f" {greeting}")
-                speak_text(greeting)
+                speak_text_blocking(greeting)
                 _show_state("LISTENING")
 
                 remainder = match.group(1)
