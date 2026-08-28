@@ -16,6 +16,13 @@ from app.voice.audio_device import get_microphone_info, get_speaker_info
 from app.voice.stt_provider import is_stt_available
 from app.voice.tts_provider import get_tts_provider, is_tts_available, LocalWindowsTTSProvider
 
+# Silence noisy backend loggers — the CLI has its own clean UI output.
+# Backend logs go to backend/logs/backend.log (via launcher) not the terminal.
+logging.getLogger().setLevel(logging.CRITICAL)
+for _noisy in ("uvicorn", "uvicorn.error", "uvicorn.access", "sqlalchemy", "alembic",
+               "app.automations.scheduler", "app.tasks", "ultron"):
+    logging.getLogger(_noisy).setLevel(logging.CRITICAL)
+
 logger = logging.getLogger(__name__)
 
 BACKEND_URL = os.getenv("ULTRON_BACKEND_URL", "http://127.0.0.1:8756")
@@ -684,6 +691,17 @@ def run_voice_loop() -> str:
     return "continue"
 
 
+def _reset_emergency_stop_if_needed() -> None:
+    """Clear a stale Emergency Stop left over from tests or previous sessions."""
+    try:
+        resp = requests.get(f"{BACKEND_URL}/api/emergency/status", headers=_headers(), timeout=5)
+        if resp.ok and resp.json().get("engaged"):
+            requests.post(f"{BACKEND_URL}/api/emergency/reset", headers=_headers(), timeout=5)
+            print(_yellow("  [INFO] Emergency Stop was active — auto-reset for new session."))
+    except Exception:
+        pass
+
+
 def main() -> None:
     try:
         _state.auth_token = get_cli_auth_token()
@@ -693,6 +711,7 @@ def main() -> None:
         if vstatus:
             _state.timeout_seconds = vstatus.get("timeout_seconds", 15.0)
 
+        _reset_emergency_stop_if_needed()
         _print_startup_dashboard(health)
     except RuntimeError as exc:
         print(_red(f"  FATAL: {exc}"))
