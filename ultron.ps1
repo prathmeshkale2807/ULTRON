@@ -78,37 +78,26 @@ if (-not (Test-BackendHealthy)) {
     Write-Host "  [1/2] Starting ULTRON backend..."
 
     # Ensure log directory exists
-    $LogDir  = Join-Path $Backend "logs"
-    $LogFile = Join-Path $LogDir "backend.log"
+    $LogDir     = Join-Path $Backend "logs"
+    $LogFileOut = Join-Path $LogDir "backend.log"
+    $LogFileErr = Join-Path $LogDir "backend.err.log"
     if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 
     try {
-        $startInfo = New-Object System.Diagnostics.ProcessStartInfo
-        $startInfo.FileName               = $Python
-        $startInfo.Arguments              = "-m uvicorn app.main:app --host 127.0.0.1 --port 8756 --no-access-log"
-        $startInfo.WorkingDirectory       = $Backend
-        $startInfo.UseShellExecute        = $false
-        $startInfo.RedirectStandardOutput = $true
-        $startInfo.RedirectStandardError  = $true
-        $startInfo.WindowStyle            = [System.Diagnostics.ProcessWindowStyle]::Hidden
+        $BackendProcess = Start-Process -FilePath $Python `
+            -ArgumentList "-m uvicorn app.main:app --host 127.0.0.1 --port 8756 --no-access-log" `
+            -WorkingDirectory $Backend `
+            -RedirectStandardOutput $LogFileOut `
+            -RedirectStandardError $LogFileErr `
+            -WindowStyle Hidden `
+            -PassThru
 
-        $BackendProcess = [System.Diagnostics.Process]::Start($startInfo)
-        $BackendOwned   = $true
+        $BackendOwned = $true
 
         if ($null -eq $BackendProcess) {
             Write-Host "  ERROR: Failed to start backend process."
             exit 1
         }
-
-        # Pipe both streams to the log file asynchronously
-        $BackendProcess.OutputDataReceived.Add([System.Diagnostics.DataReceivedEventHandler]{
-            param($s, $e) if ($e.Data) { Add-Content -Path $LogFile -Value $e.Data }
-        })
-        $BackendProcess.ErrorDataReceived.Add([System.Diagnostics.DataReceivedEventHandler]{
-            param($s, $e) if ($e.Data) { Add-Content -Path $LogFile -Value $e.Data }
-        })
-        $BackendProcess.BeginOutputReadLine()
-        $BackendProcess.BeginErrorReadLine()
 
         Write-Host "  Backend PID   $($BackendProcess.Id)  (logs -> backend/logs/backend.log)"
     } catch {
