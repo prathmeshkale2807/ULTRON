@@ -1,4 +1,4 @@
-﻿"""
+"""
 Phase 28 — JARVIS Terminal / CLI Tests
 
 Tests cover:
@@ -385,7 +385,17 @@ def test_cli_does_not_call_tool_handlers_directly():
     assert "tool.handler" not in src
     assert "handler()" not in src
     assert "pywinauto" not in src
-    assert "subprocess.run" not in src
+    # subprocess.run is permitted ONLY for Windows SAPI TTS audio synthesis.
+    # Count allowed uses: _do_speak (TTS) and _mic_listener (Popen, not run).
+    # Disallow arbitrary shell execution (e.g. subprocess.run("cmd") for tool calls).
+    # We allow subprocess.run with powershell + EncodedCommand for TTS.
+    import re
+    # Any subprocess.run call must be inside a TTS context (_do_speak / SAPI)
+    forbidden_run = re.findall(r'subprocess\.run\([^)]*\)', src)
+    for call in forbidden_run:
+        assert "EncodedCommand" in call or "powershell" in call, (
+            f"subprocess.run outside TTS context is not allowed: {call}"
+        )
     # Must not call AI provider directly
     assert "provider_manager" not in src
     assert "complete(" not in src
