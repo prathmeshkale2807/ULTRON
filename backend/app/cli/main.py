@@ -65,7 +65,7 @@ _turn_lock = threading.Lock()
 _mic_subprocess: subprocess.Popen | None = None
 
 # Wake word and natural control patterns
-WAKE_WORD_PATTERN = re.compile(r"(?i)^(?:hey\s+)?ultron(?:[,.!?\s]+(.*))?$")
+WAKE_WORD_PATTERN = re.compile(r"(?i)^(?:hey\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron)(?:[,.!?\s]+(.*))?$")
 EMERGENCY_STOP_PATTERN = re.compile(r"(?i)^ultron,?\s+(?:emergency\s+)?stop\.?$")
 CONFIRM_YES_PATTERN = re.compile(
     r"(?i)^(?:yes(?:,?\s+(?:do\s+it|please|confirm|proceed))?|confirm|go\s+ahead|continue|sure|yep|yeah|proceed|approved|do\s+it|ok|okay)[.!]?$"
@@ -338,8 +338,27 @@ Add-Type -AssemblyName System.Speech
 try {
     $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine
     $engine.SetInputToDefaultAudioDevice()
-    $grammar = New-Object System.Speech.Recognition.DictationGrammar
-    $engine.LoadGrammar($grammar)
+
+    # 1. High-accuracy custom choices grammar for wake words and key commands
+    $choices = New-Object System.Speech.Recognition.Choices
+    $choices.Add([string[]]@(
+        "Hey ULTRON", "ULTRON", "Hey Ultron", "Ultron",
+        "Hey Altron", "Altron", "Hey Ultra", "Ultra",
+        "Hey Elton", "Elton", "Hey Alltron", "Alltron",
+        "Open Notepad", "Close Notepad", "Open Chrome", "Close Chrome",
+        "Take screenshot", "Take a screenshot", "Go to YouTube",
+        "Search for Iron Man", "What time is it", "Stop", "Emergency stop",
+        "yes", "no", "confirm", "cancel", "proceed", "goodbye"
+    ))
+    $gb = New-Object System.Speech.Recognition.GrammarBuilder
+    $gb.Append($choices)
+    $grammarCustom = New-Object System.Speech.Recognition.Grammar($gb)
+    $grammarCustom.Priority = 127
+    $engine.LoadGrammar($grammarCustom)
+
+    # 2. General dictation grammar for all freeform natural language speech
+    $grammarDictation = New-Object System.Speech.Recognition.DictationGrammar
+    $engine.LoadGrammar($grammarDictation)
 
     Register-ObjectEvent -InputObject $engine -EventName "SpeechRecognized" -Action {
         $t = $Event.SourceEventArgs.Result.Text
@@ -354,7 +373,7 @@ try {
     [Console]::Out.Flush()
 
     while ($true) {
-        Start-Sleep -Milliseconds 250
+        Start-Sleep -Milliseconds 200
     }
 } catch {
     [Console]::Out.WriteLine("MIC_ERROR:" + $_.Exception.Message)
@@ -374,11 +393,6 @@ try {
         while not _stop_workers.is_set():
             if _mic_subprocess.poll() is not None:
                 break
-            # Skip readline while TTS is playing — avoids SAPI device conflict
-            # and prevents recognizing ULTRON's own synthesized voice as input.
-            if _is_speaking.is_set():
-                _stop_workers.wait(timeout=0.1)
-                continue
             line = _mic_subprocess.stdout.readline()
             if not line:
                 break
@@ -390,7 +404,7 @@ try {
             if not transcript:
                 continue
 
-            # Also skip if speaking started between readline and here
+            # Skip if ULTRON is actively speaking through the speakers
             if _is_speaking.is_set():
                 continue
 
@@ -515,6 +529,8 @@ def _print_startup_dashboard(health: dict) -> None:
     print()
     _show_state("STANDBY")
     print()
+    # Spoken announcement on boot
+    speak_text("ULTRON is online and ready, sir.")
 
 
 def _print_status_detailed(health: dict) -> None:

@@ -58,7 +58,7 @@ class VoiceSessionState(Enum):
 
 
 # Wake words that activate ULTRON from STANDBY
-WAKE_WORD_PATTERN = re.compile(r"(?i)^(?:hey\s+)?ultron(?:[,.!?\s]+(.*))?$")
+WAKE_WORD_PATTERN = re.compile(r"(?i)^(?:hey\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron)(?:[,.!?\s]+(.*))?$")
 
 # Natural confirmation patterns
 CONFIRM_YES_PATTERN = re.compile(
