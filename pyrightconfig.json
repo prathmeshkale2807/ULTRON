@@ -1,4 +1,5 @@
 {
+  "pythonPath": "backend/.venv/Scripts/python.exe",
   "venvPath": "backend",
   "venv": ".venv",
   "executionEnvironments": [
