@@ -790,6 +790,10 @@ def main() -> None:
             _state.timeout_seconds = vstatus.get("timeout_seconds", 15.0)
 
         _reset_emergency_stop_if_needed()
+
+        # Always-listening: activate conversation from the start
+        _state.active_conversation = True
+
         _print_startup_dashboard(health)
     except RuntimeError as exc:
         print(_red(f"  FATAL: {exc}"))
@@ -843,15 +847,12 @@ def main() -> None:
                 _cmd_status()
                 continue
             if cmd == "ptt":
-                _state.active_conversation = True
-                _state.last_activity = time.time()
                 _show_state("LISTENING")
                 print(_green("  [Push-To-Talk Active] Speak your command:"))
                 try:
                     spoken = input(_bold("  Speak > ")).strip()
                 except (KeyboardInterrupt, EOFError):
-                    _state.active_conversation = False
-                    _show_state("STANDBY")
+                    _show_state("LISTENING")   # back to listening, never standby
                     continue
                 if not spoken:
                     continue
@@ -863,28 +864,22 @@ def main() -> None:
                     break
                 continue
 
-            # Check if wake word in general CLI
+            # Strip optional wake word prefix from typed input
             match = WAKE_WORD_PATTERN.match(user_input)
             if match:
-                _state.active_conversation = True
-                _state.last_activity = time.time()
-                _show_state("WAKE_DETECTED")
-                greeting = "Yes, sir?"
-                print(_bold("ULTRON:") + f" {greeting}")
-                speak_text_blocking(greeting)
-                _show_state("LISTENING")
-
                 remainder = match.group(1)
                 if remainder and remainder.strip():
-                    execute_turn(remainder.strip())
-                continue
+                    user_input = remainder.strip()
+                else:
+                    # Bare wake word typed — acknowledge and keep listening
+                    greeting = "Yes, sir?"
+                    print(_bold("ULTRON:") + f" {greeting}")
+                    speak_text_blocking(greeting)
+                    _show_state("LISTENING")
+                    continue
 
-            # In continuous conversation mode or standard CLI text execution
-            if _state.active_conversation:
-                execute_turn(user_input)
-            else:
-                # In standard text CLI mode, execute directly
-                execute_turn(user_input)
+            # Always execute — no STANDBY gate in text CLI
+            execute_turn(user_input)
 
     finally:
         _stop_workers.set()
