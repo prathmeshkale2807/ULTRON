@@ -413,7 +413,8 @@ def schema_is_current() -> bool:
     head_revision = script.get_current_head()
 
     inspector = inspect(engine)
-    if "alembic_version" not in inspector.get_table_names():
+    tables = inspector.get_table_names()
+    if "alembic_version" not in tables or "system_events" not in tables or "attachments" not in tables:
         return False
 
     with engine.connect() as conn:
@@ -431,6 +432,7 @@ def run_migrations() -> None:
         import fcntl
     from alembic import command
     from alembic.config import Config
+    from sqlalchemy import inspect
 
     if getattr(sys, 'frozen', False):
         backend_dir = Path(sys._MEIPASS)
@@ -444,6 +446,17 @@ def run_migrations() -> None:
     # Override it explicitly.
     from app.core.config import get_settings
     alembic_cfg.set_main_option("sqlalchemy.url", get_settings().database_url)
+
+    # If the database file has alembic_version but missing core tables,
+    # reset alembic_version so upgrade head creates all tables from scratch.
+    try:
+        inspector = inspect(engine)
+        tables = inspector.get_table_names()
+        if "alembic_version" in tables and "system_events" not in tables:
+            with engine.begin() as conn:
+                conn.exec_driver_sql("DROP TABLE IF EXISTS alembic_version")
+    except Exception:
+        pass
 
     # Simple file lock to prevent concurrent migrations during parallel startup
     lock_path = get_settings().data_dir / "migration.lock"
