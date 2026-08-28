@@ -315,16 +315,11 @@ def _confirmation_poll_worker() -> None:
 
 
 def _watchdog_worker() -> None:
-    """Inactivity watchdog returning LISTENING state to STANDBY."""
+    """Watchdog thread — ULTRON is always listening; no inactivity timeout."""
     while not _stop_workers.is_set():
-        if _state.voice_state == "LISTENING" and _state.active_conversation:
-            now = time.time()
-            if now - _state.last_activity > _state.timeout_seconds:
-                _state.active_conversation = False
-                _state.voice_state = "STANDBY"
-                sys.stdout.write(f"\n{_dim('  [STANDBY]')}\n")
-                sys.stdout.flush()
-        _stop_workers.wait(timeout=0.5)
+        # Keep active_conversation True so ULTRON never goes to STANDBY
+        _state.active_conversation = True
+        _stop_workers.wait(timeout=1.0)
 
 
 def _mic_listener_worker() -> None:
@@ -431,48 +426,46 @@ while ($true) {
 
 
 def _handle_spoken_input(text: str) -> None:
-    """Handle recognized speech from the microphone."""
+    """Handle recognized speech from the microphone.
+
+    ULTRON is always in LISTENING mode — every recognisable utterance is
+    processed immediately.  No wake word required.
+    """
     with _turn_lock:
         if not text:
             return
 
-        # Check emergency stop
+        # Emergency stop check
         if EMERGENCY_STOP_PATTERN.match(text):
             trigger_emergency_stop()
             print()
             print(_bold("ULTRON:") + " Emergency stop activated.")
             speak_text("Emergency stop activated.")
             print()
-            _state.active_conversation = False
-            _show_state("STANDBY")
+            _show_state("LISTENING")   # stay in LISTENING even after emergency stop
             return
 
-        # In STANDBY: requires wake word
-        if not _state.active_conversation or _state.voice_state == "STANDBY":
-            match = WAKE_WORD_PATTERN.match(text)
-            if match:
-                _state.active_conversation = True
-                _state.last_activity = time.time()
+        # Strip wake word prefix if spoken (e.g. "Hey ULTRON open Chrome")
+        clean_text = text
+        match = WAKE_WORD_PATTERN.match(text)
+        if match:
+            remainder = match.group(1)
+            if remainder and remainder.strip():
+                # Command was appended to the wake word — extract it
+                clean_text = remainder.strip()
+            else:
+                # Bare wake word only — acknowledge and stay in LISTENING
                 _show_state("WAKE_DETECTED")
                 greeting = "Yes, sir?"
                 print()
                 print(_bold("ULTRON:") + f" {greeting}")
-                speak_text_blocking(greeting)   # must be heard before LISTENING
+                speak_text_blocking(greeting)
                 _show_state("LISTENING")
-
-                remainder = match.group(1)
-                if remainder and remainder.strip():
-                    execute_turn_locked(remainder.strip())
-            return
-
-        # In ACTIVE CONVERSATION (LISTENING):
-        clean_text = text
-        match = WAKE_WORD_PATTERN.match(text)
-        if match and match.group(1):
-            clean_text = match.group(1).strip()
+                return
 
         print()
         print(_cyan(f"  [Spoken Input]: {clean_text}"))
+        _state.active_conversation = True
         execute_turn_locked(clean_text)
 
 
@@ -534,13 +527,14 @@ def _print_startup_dashboard(health: dict) -> None:
     print()
     print("    ULTRON is ready.")
     print()
-    print("    Wake phrase:")
-    print(_bold('        "Hey ULTRON"'))
+    print("    Always-listening mode — no wake word required.")
+    print(_bold('        (Say "Hey ULTRON" or speak any command directly)'))
     print()
-    _show_state("STANDBY")
+    _state.active_conversation = True
+    _show_state("LISTENING")
     print()
     # Spoken announcement on boot
-    speak_text("ULTRON is online and ready, sir.")
+    speak_text("ULTRON is online and always listening, sir.")
 
 
 def _print_status_detailed(health: dict) -> None:
@@ -637,8 +631,7 @@ def execute_turn_locked(user_input: str) -> None:
         print()
         print(_bold("ULTRON:") + " Emergency stop activated.")
         print()
-        _state.active_conversation = False
-        _show_state("STANDBY")
+        _show_state("LISTENING")   # stay in LISTENING even after emergency stop
         return
 
     try:
@@ -651,14 +644,12 @@ def execute_turn_locked(user_input: str) -> None:
         print()
         speak_text_blocking(answer)   # blocks until audio done → then LISTENING
         _state.last_activity = time.time()
-        if _state.active_conversation:
-            _show_state("LISTENING")
+        _show_state("LISTENING")   # always return to LISTENING
     except requests.Timeout:
         print()
         print(_yellow("  ULTRON: Request timed out. The backend may still be processing."))
         print()
-        if _state.active_conversation:
-            _show_state("LISTENING")
+        _show_state("LISTENING")
     except RuntimeError as exc:
         msg = str(exc)
         print()
@@ -670,14 +661,12 @@ def execute_turn_locked(user_input: str) -> None:
         else:
             print(_red(f"  ULTRON ERROR: {msg}"))
         print()
-        if _state.active_conversation:
-            _show_state("LISTENING")
+        _show_state("LISTENING")
     except Exception as exc:
         print()
         print(_red(f"  ULTRON ERROR: Unexpected error -- {exc}"))
         print()
-        if _state.active_conversation:
-            _show_state("LISTENING")
+        _show_state("LISTENING")
 
 
 def execute_turn(user_input: str) -> None:
@@ -688,19 +677,19 @@ def execute_turn(user_input: str) -> None:
 def run_voice_loop() -> str:
     """Interactive JARVIS voice loop in CLI."""
     _state.voice_mode = True
+    _state.active_conversation = True
     print()
     print(_cyan("  +==========================================+"))
     print(_cyan("  |") + _bold("             ULTRON VOICE MODE            ") + _cyan("|"))
-    print(_cyan("  |") + "         JARVIS Voice Interaction         " + _cyan("|"))
+    print(_cyan("  |") + "      Always-Listening  •  JARVIS Mode    " + _cyan("|"))
     print(_cyan("  +==========================================+"))
     print()
-    print('  Wake phrase   : "Hey ULTRON" / "ULTRON"')
-    print("  Follow-ups    : Wake word NOT required once active")
-    print("  Inactivity    : Automatic return to STANDBY after timeout")
+    print("  Mode          : ALWAYS LISTENING (no wake word needed)")
+    print('  Optional      : "Hey ULTRON" prefix still accepted')
     print("  Push-To-Talk  : Type 'ptt'")
     print("  Exit voice    : Type 'voice off'")
     print()
-    _show_state("STANDBY")
+    _show_state("LISTENING")
     print()
 
     try:
@@ -756,31 +745,21 @@ def run_voice_loop() -> str:
                 user_input = spoken
                 lowered = spoken.lower()
 
-            # In STANDBY: check wake word
-            if not _state.active_conversation or _state.voice_state == "STANDBY":
-                match = WAKE_WORD_PATTERN.match(user_input)
-                if match:
-                    _state.active_conversation = True
-                    _state.last_activity = time.time()
-                    _show_state("WAKE_DETECTED")
+            # Always-listening: strip optional wake word prefix and execute
+            match = WAKE_WORD_PATTERN.match(user_input)
+            if match:
+                remainder = match.group(1)
+                if remainder and remainder.strip():
+                    # Wake word + command in one utterance
+                    user_input = remainder.strip()
+                else:
+                    # Bare wake word typed — acknowledge and keep listening
                     greeting = "Yes, sir?"
                     print()
                     print(_bold("ULTRON:") + f" {greeting}")
-                    speak_text_blocking(greeting)   # must be heard before LISTENING
+                    speak_text_blocking(greeting)
                     _show_state("LISTENING")
-
-                    remainder = match.group(1)
-                    if remainder and remainder.strip():
-                        execute_turn(remainder.strip())
                     continue
-                else:
-                    print(_dim('  [Ignored in STANDBY -- say "Hey ULTRON" or type "ptt"]'))
-                    continue
-
-            # In LISTENING: follow-up commands do NOT require wake word
-            match = WAKE_WORD_PATTERN.match(user_input)
-            if match and match.group(1):
-                user_input = match.group(1).strip()
 
             execute_turn(user_input)
 
