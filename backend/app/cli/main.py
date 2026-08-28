@@ -334,50 +334,60 @@ def _mic_listener_worker() -> None:
         return
 
     ps_code = """
-Add-Type -AssemblyName System.Speech
-try {
-    $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine
-    $engine.SetInputToDefaultAudioDevice()
+$csharp = @"
+using System;
+using System.Speech.Recognition;
 
-    # 1. High-accuracy custom choices grammar for wake words and key commands
-    $choices = New-Object System.Speech.Recognition.Choices
-    $choices.Add([string[]]@(
-        "Hey ULTRON", "ULTRON", "Hey Ultron", "Ultron",
-        "Hey Altron", "Altron", "Hey Ultra", "Ultra",
-        "Hey Elton", "Elton", "Hey Alltron", "Alltron",
-        "Open Notepad", "Close Notepad", "Open Chrome", "Close Chrome",
-        "Take screenshot", "Take a screenshot", "Go to YouTube",
-        "Search for Iron Man", "What time is it", "Stop", "Emergency stop",
-        "yes", "no", "confirm", "cancel", "proceed", "goodbye"
-    ))
-    $gb = New-Object System.Speech.Recognition.GrammarBuilder
-    $gb.Append($choices)
-    $grammarCustom = New-Object System.Speech.Recognition.Grammar($gb)
-    $grammarCustom.Priority = 127
-    $engine.LoadGrammar($grammarCustom)
+public class UltronMicBridge {
+    private SpeechRecognitionEngine engine;
 
-    # 2. General dictation grammar for all freeform natural language speech
-    $grammarDictation = New-Object System.Speech.Recognition.DictationGrammar
-    $engine.LoadGrammar($grammarDictation)
+    public void Start() {
+        try {
+            engine = new SpeechRecognitionEngine();
+            engine.SetInputToDefaultAudioDevice();
 
-    Register-ObjectEvent -InputObject $engine -EventName "SpeechRecognized" -Action {
-        $t = $Event.SourceEventArgs.Result.Text
-        if ($t -and $t.Trim().Length -gt 0) {
-            [Console]::Out.WriteLine("MIC_TRANSCRIPT:" + $t)
-            [Console]::Out.Flush()
+            Choices choices = new Choices();
+            choices.Add(new string[] {
+                "Hey ULTRON", "ULTRON", "Hey Ultron", "Ultron",
+                "Hey Altron", "Altron", "Hey Ultra", "Ultra",
+                "Hey Elton", "Elton", "Hey Alltron", "Alltron",
+                "Open Notepad", "Close Notepad", "Open Chrome", "Close Chrome",
+                "Take screenshot", "Take a screenshot", "Go to YouTube",
+                "Search for Iron Man", "What time is it", "Stop", "Emergency stop",
+                "yes", "no", "confirm", "cancel", "proceed", "goodbye"
+            });
+            GrammarBuilder gb = new GrammarBuilder(choices);
+            Grammar custom = new Grammar(gb);
+            custom.Priority = 127;
+            engine.LoadGrammar(custom);
+
+            DictationGrammar dictation = new DictationGrammar();
+            engine.LoadGrammar(dictation);
+
+            engine.SpeechRecognized += (s, e) => {
+                if (e.Result != null && !string.IsNullOrWhiteSpace(e.Result.Text)) {
+                    Console.WriteLine("MIC_TRANSCRIPT:" + e.Result.Text);
+                    Console.Out.Flush();
+                }
+            };
+
+            engine.RecognizeAsync(RecognizeMode.Multiple);
+            Console.WriteLine("MIC_READY");
+            Console.Out.Flush();
+        } catch (Exception ex) {
+            Console.WriteLine("MIC_ERROR:" + ex.Message);
+            Console.Out.Flush();
         }
-    } | Out-Null
-
-    $engine.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple)
-    [Console]::Out.WriteLine("MIC_READY")
-    [Console]::Out.Flush()
-
-    while ($true) {
-        Start-Sleep -Milliseconds 200
     }
-} catch {
-    [Console]::Out.WriteLine("MIC_ERROR:" + $_.Exception.Message)
-    [Console]::Out.Flush()
+}
+"@
+
+Add-Type -TypeDefinition $csharp -ReferencedAssemblies "System.Speech"
+$bridge = New-Object UltronMicBridge
+$bridge.Start()
+
+while ($true) {
+    [System.Threading.Thread]::Sleep(100)
 }
 """
     try:
