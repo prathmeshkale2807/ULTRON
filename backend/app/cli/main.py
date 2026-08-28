@@ -1,16 +1,22 @@
 from __future__ import annotations
 
+import base64
+import logging
 import os
+import re
+import subprocess
 import sys
 import threading
 import time
 import uuid
-import re
 import requests
 
 from app.cli.auth import get_cli_auth_token
 from app.voice.audio_device import get_microphone_info, get_speaker_info
+from app.voice.stt_provider import is_stt_available
 from app.voice.tts_provider import get_tts_provider, is_tts_available, LocalWindowsTTSProvider
+
+logger = logging.getLogger(__name__)
 
 BACKEND_URL = os.getenv("ULTRON_BACKEND_URL", "http://127.0.0.1:8756")
 _CONFIRM_POLL_INTERVAL = 0.5
@@ -43,10 +49,18 @@ class _State:
 _state = _State()
 _seen_confirmations: set[str] = set()
 _stop_workers = threading.Event()
+_turn_lock = threading.Lock()
+_mic_subprocess: subprocess.Popen | None = None
 
-# Wake word pattern
+# Wake word and natural control patterns
 WAKE_WORD_PATTERN = re.compile(r"(?i)^(?:hey\s+)?ultron(?:[,.!?\s]+(.*))?$")
 EMERGENCY_STOP_PATTERN = re.compile(r"(?i)^ultron,?\s+(?:emergency\s+)?stop\.?$")
+CONFIRM_YES_PATTERN = re.compile(
+    r"(?i)^(?:yes(?:,?\s+(?:do\s+it|please|confirm|proceed))?|confirm|go\s+ahead|continue|sure|yep|yeah|proceed|approved|do\s+it|ok|okay)[.!]?$"
+)
+CONFIRM_NO_PATTERN = re.compile(
+    r"(?i)^(?:no(?:,?\s+(?:cancel|stop|don'?t|deny))?|cancel|stop|don'?t\s+do\s+it|deny|never\s+mind|forget\s+it|reject|disapproved)[.!]?$"
+)
 
 
 def _headers() -> dict[str, str]:
@@ -92,25 +106,35 @@ def check_voice_status() -> dict | None:
     return None
 
 
-def _component_status(health: dict, name_prefix: str) -> str:
+def _component_status(health: dict, name: str) -> str:
     for c in health.get("components", []):
-        if c.get("name", "").startswith(name_prefix):
+        if c.get("name", "") == name:
+            return c.get("status", "unknown")
+    for c in health.get("components", []):
+        if c.get("name", "").startswith(name) and c.get("status") in ("ok", "ready"):
+            return c.get("status")
+    for c in health.get("components", []):
+        if c.get("name", "").startswith(name):
             return c.get("status", "unknown")
     return "unknown"
 
 
 def _status_icon(status: str) -> str:
-    mapping = {
-        "ok": _green("ONLINE"),
-        "ready": _green("READY"),
-        "active": _green("ACTIVE"),
-        "not_configured": _yellow("NOT CONFIGURED"),
-        "not_implemented": _yellow("NOT IMPLEMENTED"),
-        "unauthenticated": _yellow("UNAUTHENTICATED"),
-        "unavailable": _red("UNAVAILABLE"),
-        "unknown": _dim("UNKNOWN"),
-    }
-    return mapping.get(status.lower(), _yellow(status.upper()))
+    s = status.lower()
+    if s in ("ok", "online"):
+        return _green("[ONLINE]")
+    elif s in ("ready", "active"):
+        return _green(f"[{status.upper()}]")
+    elif s == "not_configured":
+        return _yellow("[NOT CONFIGURED]")
+    elif s == "not_implemented":
+        return _yellow("[NOT IMPLEMENTED]")
+    elif s == "unauthenticated":
+        return _yellow("[UNAUTHENTICATED]")
+    elif s in ("unavailable", "error"):
+        return _red("[UNAVAILABLE]")
+    else:
+        return _dim(f"[{status.upper()}]")
 
 
 def create_session() -> str:
@@ -142,7 +166,6 @@ def speak_text(text: str) -> None:
     if isinstance(tts, LocalWindowsTTSProvider):
         tts._speak_sync(text)
     else:
-        # Fallback for mock or other providers
         pass
 
 
@@ -234,6 +257,122 @@ def _watchdog_worker() -> None:
         _stop_workers.wait(timeout=0.5)
 
 
+def _mic_listener_worker() -> None:
+    """Background continuous Speech Recognition worker."""
+    global _mic_subprocess
+    if sys.platform != "win32" or not get_microphone_info().get("available"):
+        return
+
+    ps_code = """
+Add-Type -AssemblyName System.Speech
+try {
+    $engine = New-Object System.Speech.Recognition.SpeechRecognitionEngine
+    $engine.SetInputToDefaultAudioDevice()
+    $grammar = New-Object System.Speech.Recognition.DictationGrammar
+    $engine.LoadGrammar($grammar)
+
+    Register-ObjectEvent -InputObject $engine -EventName "SpeechRecognized" -Action {
+        $t = $Event.SourceEventArgs.Result.Text
+        if ($t -and $t.Trim().Length -gt 0) {
+            [Console]::Out.WriteLine("MIC_TRANSCRIPT:" + $t)
+            [Console]::Out.Flush()
+        }
+    } | Out-Null
+
+    $engine.RecognizeAsync([System.Speech.Recognition.RecognizeMode]::Multiple)
+    [Console]::Out.WriteLine("MIC_READY")
+    [Console]::Out.Flush()
+
+    while ($true) {
+        Start-Sleep -Milliseconds 250
+    }
+} catch {
+    [Console]::Out.WriteLine("MIC_ERROR:" + $_.Exception.Message)
+    [Console]::Out.Flush()
+}
+"""
+    try:
+        enc = base64.b64encode(ps_code.encode("utf-16le")).decode("ascii")
+        _mic_subprocess = subprocess.Popen(
+            ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+        )
+
+        while not _stop_workers.is_set():
+            if _mic_subprocess.poll() is not None:
+                break
+            line = _mic_subprocess.stdout.readline()
+            if not line:
+                break
+            line = line.strip()
+            if not line.startswith("MIC_TRANSCRIPT:"):
+                continue
+
+            transcript = line[len("MIC_TRANSCRIPT:"):].strip()
+            if not transcript:
+                continue
+
+            _handle_spoken_input(transcript)
+
+    except Exception as e:
+        logger.debug(f"Mic listener error: {e}")
+    finally:
+        if _mic_subprocess and _mic_subprocess.poll() is None:
+            try:
+                _mic_subprocess.terminate()
+            except Exception:
+                pass
+
+
+def _handle_spoken_input(text: str) -> None:
+    """Handle recognized speech from the microphone."""
+    with _turn_lock:
+        if not text:
+            return
+
+        # Check emergency stop
+        if EMERGENCY_STOP_PATTERN.match(text):
+            trigger_emergency_stop()
+            print()
+            print(_bold("ULTRON:") + " Emergency stop activated.")
+            speak_text("Emergency stop activated.")
+            print()
+            _state.active_conversation = False
+            _show_state("STANDBY")
+            return
+
+        # In STANDBY: requires wake word
+        if not _state.active_conversation or _state.voice_state == "STANDBY":
+            match = WAKE_WORD_PATTERN.match(text)
+            if match:
+                _state.active_conversation = True
+                _state.last_activity = time.time()
+                _show_state("WAKE_DETECTED")
+                greeting = "Yes, sir?"
+                print()
+                print(_bold("ULTRON:") + f" {greeting}")
+                speak_text(greeting)
+                _show_state("LISTENING")
+
+                remainder = match.group(1)
+                if remainder and remainder.strip():
+                    execute_turn_locked(remainder.strip())
+            return
+
+        # In ACTIVE CONVERSATION (LISTENING):
+        clean_text = text
+        match = WAKE_WORD_PATTERN.match(text)
+        if match and match.group(1):
+            clean_text = match.group(1).strip()
+
+        print()
+        print(_cyan(f"  [Spoken Input]: {clean_text}"))
+        execute_turn_locked(clean_text)
+
+
 def send_message(text: str) -> str:
     resp = requests.post(
         f"{BACKEND_URL}/api/conversations/{_state.conversation_id}/messages",
@@ -266,37 +405,34 @@ def _show_state(label: str) -> None:
 
 def _print_startup_dashboard(health: dict) -> None:
     mic = get_microphone_info()
-    spk = get_speaker_info()
+    stt_ok = is_stt_available()
     tts_ok = is_tts_available()
 
-    col = 16
+    col = 20
     print()
-    print(_cyan("  ============================================"))
-    print(_cyan("               ULTRON INITIALIZING           "))
-    print(_cyan("  ============================================"))
+    print(_cyan("    =============================================="))
+    print(_cyan("                 ULTRON INITIALIZING              "))
+    print(_cyan("              PERSONAL AI ASSISTANT               "))
+    print(_cyan("    =============================================="))
     print()
-    print(f"  {'Backend':<{col}}: {_green('ONLINE')}")
-    print(f"  {'Database':<{col}}: {_status_icon(_component_status(health, 'database'))}")
-    print(f"  {'AI Provider':<{col}}: {_status_icon(_component_status(health, 'ai_provider'))}")
-    print(f"  {'Voice Engine':<{col}}: {_green('ONLINE')}")
-    print(f"  {'Microphone':<{col}}: {_status_icon('READY' if mic['available'] else 'UNAVAILABLE')}")
-    print(f"  {'TTS':<{col}}: {_status_icon('READY' if tts_ok else 'UNAVAILABLE')}")
-    print(f"  {'Authentication':<{col}}: {_green('READY')}")
+    print("    Initializing core systems...")
+    print(f"    {'Database':<{col}}{_status_icon(_component_status(health, 'database'))}")
+    print(f"    {'Backend':<{col}}{_green('[ONLINE]')}")
+    print(f"    {'AI Provider':<{col}}{_status_icon(_component_status(health, 'ai_provider'))}")
+    print(f"    {'Security':<{col}}{_green('[ACTIVE]')}")
+    print(f"    {'Tool Registry':<{col}}{_status_icon(_component_status(health, 'windows_control'))}")
+    print(f"    {'Voice Engine':<{col}}{_status_icon(_component_status(health, 'voice_engine'))}")
+    print(f"    {'Microphone':<{col}}{_status_icon('ready' if mic['available'] else 'unavailable')}")
+    print(f"    {'TTS':<{col}}{_status_icon('ready' if tts_ok else 'unavailable')}")
+    print(f"    {'Speech Recognition':<{col}}{_status_icon('ready' if stt_ok else 'unavailable')}")
+    print(f"    {'Speech Synthesis':<{col}}{_status_icon('ready' if tts_ok else 'unavailable')}")
     print()
-    print(_cyan("  ============================================"))
-    print(_cyan("                  U L T R O N                 "))
-    print(_cyan("             PERSONAL AI ASSISTANT            "))
-    print(_cyan("  ============================================"))
+    print(_cyan("    =============================================="))
     print()
-    print(f"  {'Backend':<{col}}: {_green('ONLINE')}")
-    print(f"  {'AI Provider':<{col}}: {_status_icon(_component_status(health, 'ai_provider'))}")
-    print(f"  {'Voice':<{col}}: {_green('ONLINE')}")
-    print(f"  {'Microphone':<{col}}: {_status_icon('READY' if mic['available'] else 'UNAVAILABLE')}")
-    print(f"  {'TTS':<{col}}: {_status_icon('READY' if tts_ok else 'UNAVAILABLE')}")
+    print("    ULTRON is ready.")
     print()
-    print("  Say:")
-    print()
-    print(_bold('      "Hey ULTRON"'))
+    print("    Wake phrase:")
+    print(_bold('        "Hey ULTRON"'))
     print()
     _show_state("STANDBY")
     print()
@@ -305,6 +441,7 @@ def _print_startup_dashboard(health: dict) -> None:
 def _print_status_detailed(health: dict) -> None:
     mic = get_microphone_info()
     spk = get_speaker_info()
+    stt_ok = is_stt_available()
     tts_ok = is_tts_available()
     vstatus = check_voice_status()
 
@@ -322,7 +459,8 @@ def _print_status_detailed(health: dict) -> None:
     _row("Voice Engine",      _component_status(health, "voice_engine"))
     _row("Security",          "active")
     _row("Microphone",        "ready" if mic["available"] else "unavailable")
-    _row("TTS",               "ready" if tts_ok else "unavailable")
+    _row("Speech Recognition","ready" if stt_ok else "unavailable")
+    _row("Speech Synthesis",  "ready" if tts_ok else "unavailable")
     _row("Session",           "ok" if _state.session_id else "unavailable")
 
     if mic["name"]:
@@ -348,7 +486,7 @@ _HELP_TEXT = """
     help       Show this help message
     status     Display live backend, voice, and session status
     clear      Clear the terminal screen
-    voice      Enter interactive JARVIS voice mode
+    voice      Enter interactive voice mode
     voice off  Exit voice mode back to text mode
     ptt        Activate push-to-talk (Enter LISTENING mode)
     exit       Cleanly invalidate session and exit
@@ -382,8 +520,8 @@ def _cmd_status() -> None:
         print()
 
 
-def execute_turn(user_input: str) -> None:
-    """Process a natural language user turn."""
+def execute_turn_locked(user_input: str) -> None:
+    """Process a natural language user turn with lock."""
     _state.last_activity = time.time()
     _show_state("THINKING")
 
@@ -399,6 +537,7 @@ def execute_turn(user_input: str) -> None:
         return
 
     try:
+        _show_state("EXECUTING")
         answer = send_message(user_input)
         handle_pending_confirmations()
         _show_state("SPEAKING")
@@ -434,6 +573,11 @@ def execute_turn(user_input: str) -> None:
         print()
         if _state.active_conversation:
             _show_state("LISTENING")
+
+
+def execute_turn(user_input: str) -> None:
+    with _turn_lock:
+        execute_turn_locked(user_input)
 
 
 def run_voice_loop() -> str:
@@ -565,6 +709,11 @@ def main() -> None:
     )
     watchdog_thread.start()
 
+    mic_thread = threading.Thread(
+        target=_mic_listener_worker, daemon=True, name="ultron-mic-listener"
+    )
+    mic_thread.start()
+
     try:
         while True:
             try:
@@ -642,6 +791,12 @@ def main() -> None:
 
     finally:
         _stop_workers.set()
+        global _mic_subprocess
+        if _mic_subprocess and _mic_subprocess.poll() is None:
+            try:
+                _mic_subprocess.terminate()
+            except Exception:
+                pass
         print()
         print(_dim("  Closing session..."))
         invalidate_session()

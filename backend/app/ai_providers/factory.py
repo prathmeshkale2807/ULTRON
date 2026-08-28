@@ -42,10 +42,12 @@ def build_provider_manager(settings: Settings | None = None) -> ProviderManager:
         "gemini": GeminiProvider(gemini_config),
     }
 
+    fallback = settings.ai_fallback_provider or None
+
     return ProviderManager(
         providers=providers,
         primary=settings.ai_primary_provider,
-        fallback=settings.ai_fallback_provider,
+        fallback=fallback,
     )
 
 

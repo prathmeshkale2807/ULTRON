@@ -95,9 +95,30 @@ async def health_check(db: Session = Depends(get_db)) -> HealthResponse:
             logger.exception("Provider health check failed")
             _provider_health_cache["results"] = {}
 
-    for name, health in _provider_health_cache["results"].items():
+    # Report individual provider statuses (ai_provider.claude, ai_provider.gemini, etc.)
+    provider_results: dict = _provider_health_cache.get("results", {})
+    for name, health in provider_results.items():
         components.append(
             ComponentStatus(name=f"ai_provider.{name}", status=health.status, detail=health.detail or None)
+        )
+
+    # Also report a single "ai_provider" summary using the primary provider's status.
+    from app.core.config import get_settings as _get_settings
+    _primary = _get_settings().ai_primary_provider
+    if _primary in provider_results:
+        ph = provider_results[_primary]
+        components.append(
+            ComponentStatus(name="ai_provider", status=ph.status, detail=ph.detail or None)
+        )
+    elif provider_results:
+        ok = next((h for h in provider_results.values() if h.status == "ok"), None)
+        chosen = ok or next(iter(provider_results.values()))
+        components.append(
+            ComponentStatus(name="ai_provider", status=chosen.status, detail=chosen.detail or None)
+        )
+    else:
+        components.append(
+            ComponentStatus(name="ai_provider", status="not_configured", detail="No providers available")
         )
 
     # Phase 6: Windows Control
@@ -135,9 +156,11 @@ async def health_check(db: Session = Depends(get_db)) -> HealthResponse:
     )
 
     # Voice Engine checks
-    stt_key = os.getenv("DEEPGRAM_API_KEY")
-    tts_key = os.getenv("ELEVENLABS_API_KEY")
-    voice_status = "ok" if stt_key and tts_key and stt_key != "not_configured" and tts_key != "not_configured" else "not_configured"
+    from app.voice.tts_provider import is_tts_available
+    from app.voice.stt_provider import is_stt_available
+    stt_ok = is_stt_available()
+    tts_ok = is_tts_available()
+    voice_status = "ok" if (stt_ok and tts_ok) else ("ready" if (stt_ok or tts_ok) else "not_configured")
     
     components.append(
         ComponentStatus(

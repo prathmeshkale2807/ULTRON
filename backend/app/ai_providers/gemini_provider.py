@@ -165,19 +165,24 @@ class GeminiProvider(AIProvider):
         if not self.config.api_key:
             return ProviderHealth(self.name, "not_configured", "No API key set")
         try:
+            # Use models.get() — a free metadata call that validates the API key
+            # and model availability without consuming any generation quota.
             await asyncio.wait_for(
-                self.client.aio.models.generate_content(
+                asyncio.to_thread(
+                    self.client.models.get,
                     model=self.config.model,
-                    contents=[{"role": "user", "parts": [{"text": "ping"}]}],
-                    config=genai_types.GenerateContentConfig(max_output_tokens=1),
                 ),
-                timeout=self.config.timeout_seconds,
+                timeout=10.0,
             )
             return ProviderHealth(self.name, "ok")
         except genai_errors.ClientError as exc:
             status = getattr(exc, "code", None)
-            if status == 401 or status == 403:
+            if status in (401, 403):
                 return ProviderHealth(self.name, "unauthenticated", "API key rejected")
+            if status == 404:
+                return ProviderHealth(self.name, "unreachable", f"Model not found: {self.config.model}")
             return ProviderHealth(self.name, "unreachable", str(exc.__class__.__name__))
         except (TimeoutError, genai_errors.APIError) as exc:
+            return ProviderHealth(self.name, "unreachable", str(exc.__class__.__name__))
+        except Exception as exc:  # noqa: BLE001
             return ProviderHealth(self.name, "unreachable", str(exc.__class__.__name__))

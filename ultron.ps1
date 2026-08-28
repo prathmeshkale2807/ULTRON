@@ -27,7 +27,6 @@
 
 [CmdletBinding()]
 param (
-    [Alias("Debug")]
     [switch]$DebugMode
 )
 
@@ -58,14 +57,6 @@ function Test-BackendHealthy {
     }
 }
 
-# ── Banner ─────────────────────────────────────────────────────────────────
-Write-Host ""
-Write-Host "  +==========================================+"
-Write-Host "  |              U L T R O N                 |"
-Write-Host "  |        PERSONAL AI ASSISTANT             |"
-Write-Host "  +==========================================+"
-Write-Host ""
-
 # ── Verify .venv exists ───────────────────────────────────────────────────
 if (-not (Test-Path $Python)) {
     Write-Host "  ERROR: Python virtual environment not found."
@@ -83,10 +74,8 @@ if (-not (Test-Path $Python)) {
 $BackendProcess  = $null   # process started BY THIS LAUNCHER (null = not started)
 $BackendOwned    = $false  # true only if we started it ourselves
 
-if (Test-BackendHealthy) {
-    Write-Host "  Backend       ALREADY RUNNING (attaching)"
-} else {
-    Write-Host "  [1/3] Starting ULTRON backend..."
+if (-not (Test-BackendHealthy)) {
+    Write-Host "  [1/2] Starting ULTRON backend..."
 
     try {
         $startInfo = New-Object System.Diagnostics.ProcessStartInfo
@@ -113,7 +102,7 @@ if (Test-BackendHealthy) {
     }
 
     # ── Wait for backend to become healthy ────────────────────────────────
-    Write-Host "  [2/3] Waiting for backend to become healthy..."
+    Write-Host "  [2/2] Waiting for backend to become healthy..."
 
     $Ready   = $false
     $Elapsed = 0
@@ -148,9 +137,6 @@ if (Test-BackendHealthy) {
 }
 
 # ── Start the JARVIS Terminal CLI ──────────────────────────────────────────
-Write-Host "  [3/3] Starting ULTRON terminal..."
-Write-Host ""
-
 $CliExitCode = 0
 
 try {
