@@ -62,6 +62,11 @@ WAKE_WORD_PATTERN = re.compile(
     r"(?i)^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron|electron|oltron|autron)(?:[,.!?\s]+(.*))?$"
 )
 
+# Direct commands that wake ULTRON and execute immediately even from STANDBY
+DIRECT_COMMAND_PATTERN = re.compile(
+    r"(?i)^(?:open|close|launch|exit|write|type|take|capture|go\s+to|search|what|who|how|status|system\s+status|help|where|check|turn|send|battery|do\s+it|confirm|cancel|yes|no)\b.*$"
+)
+
 # Natural confirmation patterns
 CONFIRM_YES_PATTERN = re.compile(
     r"(?i)^(?:yes(?:,?\s+(?:do\s+it|please|confirm|proceed))?|confirm|go\s+ahead|continue|sure|yep|yeah|proceed|approved|do\s+it|ok|okay)[.!]?$"
@@ -284,7 +289,7 @@ class VoiceSession:
                             self.set_state(VoiceSessionState.STANDBY)
                             continue
 
-                    # 3. STANDBY mode: Check for Wake Word
+                    # 3. STANDBY mode: Check for Wake Word or Direct Command
                     if (
                         self.state == VoiceSessionState.STANDBY
                         or not self.active_conversation
@@ -314,6 +319,17 @@ class VoiceSession:
                                         self.generation_id
                                     )
                                 )
+                        elif DIRECT_COMMAND_PATTERN.match(text):
+                            # Direct command spoken in STANDBY without explicit wake word prefix ('Close Chrome', 'Write hello')
+                            self.active_conversation = True
+                            self._reset_watchdog()
+                            self.set_state(VoiceSessionState.PROCESSING)
+                            self.generation_id += 1
+                            self.generation_task = asyncio.create_task(
+                                self._generate_response(
+                                    text.strip(), self.generation_id
+                                )
+                            )
                         else:
                             # Ignored in STANDBY (background noise / unaddressed speech)
                             logger.debug(
