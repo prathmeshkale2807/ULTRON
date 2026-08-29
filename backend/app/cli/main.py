@@ -362,6 +362,7 @@ async def _voice_main(db, session_id: str, conversation_id: str, principal_id: s
         on_state_change=_on_state_change,
         on_transcript=_on_transcript,
         on_response=_on_response,
+        turn_handler=send_message,
     )
     set_active_voice_assistant(assistant)
 

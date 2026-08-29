@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -40,6 +40,7 @@ class VoiceAssistant:
         on_state_change: Optional[Callable[[VoiceSessionState], None]] = None,
         on_transcript: Optional[Callable[[str, bool], None]] = None,
         on_response: Optional[Callable[[str], None]] = None,
+        turn_handler: Optional[Callable[[str], Any]] = None,
     ):
         self.db = db
         self.principal_id = principal_id
@@ -50,6 +51,7 @@ class VoiceAssistant:
         self.on_state_change = on_state_change
         self.on_transcript = on_transcript
         self.on_response = on_response
+        self.turn_handler = turn_handler
 
         self.session: Optional[VoiceSession] = None
         self._is_running = False
@@ -84,6 +86,7 @@ class VoiceAssistant:
             on_state_change=self.on_state_change,
             on_transcript=self.on_transcript,
             on_response=self.on_response,
+            turn_handler=self.turn_handler,
         )
         await self.session.start()
         self._is_running = True

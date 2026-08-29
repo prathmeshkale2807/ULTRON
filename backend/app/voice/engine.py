@@ -20,7 +20,7 @@ import asyncio
 import logging
 import re
 from enum import Enum, auto
-from typing import Callable, Optional
+from typing import Any, Callable, Optional
 
 from sqlalchemy.orm import Session
 
@@ -98,6 +98,7 @@ class VoiceSession:
         on_state_change: Optional[Callable[[VoiceSessionState], None]] = None,
         on_transcript: Optional[Callable[[str, bool], None]] = None,
         on_response: Optional[Callable[[str], None]] = None,
+        turn_handler: Optional[Callable[[str], Any]] = None,
     ):
         self.db = db
         self.conversation_id = conversation_id
@@ -109,6 +110,7 @@ class VoiceSession:
         self.on_state_change = on_state_change
         self.on_transcript = on_transcript
         self.on_response = on_response
+        self.turn_handler = turn_handler
 
         self.stt: STTProvider = get_stt_provider()
         self.tts: TTSProvider = get_tts_provider()
@@ -416,12 +418,19 @@ class VoiceSession:
 
     async def _generate_response(self, text: str, gen_id: int) -> None:
         try:
-            response = await self.conversation_manager.process_turn(
-                conversation_id=self.conversation_id,
-                user_text=text,
-                session_id=self.session_id,
-                principal_id=self.principal_id,
-            )
+            if self.turn_handler:
+                if asyncio.iscoroutinefunction(self.turn_handler):
+                    response = await self.turn_handler(text)
+                else:
+                    loop = asyncio.get_running_loop()
+                    response = await loop.run_in_executor(None, self.turn_handler, text)
+            else:
+                response = await self.conversation_manager.process_turn(
+                    conversation_id=self.conversation_id,
+                    user_text=text,
+                    session_id=self.session_id,
+                    principal_id=self.principal_id,
+                )
 
             if gen_id != self.generation_id:
                 logger.info("Generation stale, dropping.")
