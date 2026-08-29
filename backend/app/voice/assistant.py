@@ -22,11 +22,34 @@ logger = logging.getLogger(__name__)
 
 # Active singleton voice assistant instance to prevent duplicate concurrent sessions
 _active_assistant: Optional[VoiceAssistant] = None
+_voice_event_subscribers: list[asyncio.Queue] = []
+
+
+def subscribe_voice_events() -> asyncio.Queue:
+    q: asyncio.Queue = asyncio.Queue(maxsize=100)
+    _voice_event_subscribers.append(q)
+    return q
+
+
+def unsubscribe_voice_events(q: asyncio.Queue) -> None:
+    if q in _voice_event_subscribers:
+        _voice_event_subscribers.remove(q)
+
+
+def broadcast_voice_event(event: dict) -> None:
+    for q in list(_voice_event_subscribers):
+        try:
+            q.put_nowait(event)
+        except Exception:
+            pass
 
 
 class VoiceAssistant:
     """
-    High-level JARVIS voice assistant controller.
+    High-level controller for ULTRON JARVIS-Style Voice Assistant.
+
+    Manages lifecycle, push-to-talk triggers, audio streams, and callbacks.
+    Ensures single active voice session across CLI and desktop layers.
     """
 
     def __init__(
@@ -48,13 +71,28 @@ class VoiceAssistant:
         self.conversation_id = conversation_id or f"voice-{asyncio.get_event_loop().time()}"
 
         self.start_in_standby = start_in_standby
-        self.on_state_change = on_state_change
-        self.on_transcript = on_transcript
-        self.on_response = on_response
+        self._user_on_state_change = on_state_change
+        self._user_on_transcript = on_transcript
+        self._user_on_response = on_response
         self.turn_handler = turn_handler
 
         self.session: Optional[VoiceSession] = None
         self._is_running = False
+
+    def _handle_state_change(self, state: VoiceSessionState) -> None:
+        broadcast_voice_event({"type": "state", "state": state.name})
+        if self._user_on_state_change:
+            self._user_on_state_change(state)
+
+    def _handle_transcript(self, text: str, is_final: bool) -> None:
+        broadcast_voice_event({"type": "transcript", "text": text, "is_final": is_final})
+        if self._user_on_transcript:
+            self._user_on_transcript(text, is_final)
+
+    def _handle_response(self, text: str) -> None:
+        broadcast_voice_event({"type": "response", "text": text})
+        if self._user_on_response:
+            self._user_on_response(text)
 
     @property
     def is_running(self) -> bool:
@@ -83,9 +121,9 @@ class VoiceAssistant:
             session_id=self.session_id,
             start_in_standby=self.start_in_standby,
             close_on_timeout=False,  # Persist in STANDBY on timeout instead of disconnecting
-            on_state_change=self.on_state_change,
-            on_transcript=self.on_transcript,
-            on_response=self.on_response,
+            on_state_change=self._handle_state_change,
+            on_transcript=self._handle_transcript,
+            on_response=self._handle_response,
             turn_handler=self.turn_handler,
         )
         await self.session.start()

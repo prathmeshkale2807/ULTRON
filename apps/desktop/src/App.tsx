@@ -6,7 +6,8 @@ import { ConversationProvider } from './contexts/ConversationContext';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { MainLayout } from './layout/MainLayout';
 
-// Placeholder Views
+// Views
+import { JarvisView } from './views/JarvisView';
 import { ChatView } from './views/ChatView';
 import { SecurityView } from './views/SecurityView';
 import { TasksView } from './views/TasksView';
@@ -22,7 +23,8 @@ export default function App() {
             <MemoryRouter>
               <Routes>
                 <Route path="/" element={<MainLayout />}>
-                  <Route index element={<ChatView />} />
+                  <Route index element={<JarvisView />} />
+                  <Route path="chat" element={<ChatView />} />
                   <Route path="devices" element={<DevicesView />} />
                   <Route path="tasks" element={<TasksView />} />
                   <Route path="security" element={<SecurityView />} />
@@ -35,3 +37,4 @@ export default function App() {
     </ErrorBoundary>
   );
 }
+

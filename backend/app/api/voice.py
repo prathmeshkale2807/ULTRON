@@ -73,6 +73,49 @@ def get_voice_status(
     )
 
 
+@router.get("/events")
+async def voice_events(
+    principal: Principal = Depends(require_local_auth),
+):
+    from fastapi.responses import StreamingResponse
+    from app.voice.assistant import subscribe_voice_events, unsubscribe_voice_events
+
+    async def event_generator():
+        q = subscribe_voice_events()
+        try:
+            assistant = get_active_voice_assistant()
+            status = assistant.get_status() if assistant else {"state": "STANDBY"}
+            yield f"data: {json.dumps({'type': 'init', 'status': status})}\n\n"
+            while True:
+                data = await q.get()
+                yield f"data: {json.dumps(data)}\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            unsubscribe_voice_events(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@router.post("/push-to-talk")
+def push_to_talk(
+    principal: Principal = Depends(require_local_auth),
+):
+    assistant = get_active_voice_assistant()
+    if not assistant or not assistant.is_running:
+        raise HTTPException(status_code=400, detail="Voice assistant not active")
+    assistant.push_to_talk()
+    return {"status": "ok", "state": "LISTENING"}
+
+
 @router.post("/ticket")
 def create_voice_ticket(
     request: VoiceTicketRequest,
