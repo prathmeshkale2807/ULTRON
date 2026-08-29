@@ -761,22 +761,27 @@ def main() -> None:
 
     try:
         while not _stop_workers.is_set():
-            # In live voice mode, we do not print prompts or block on input().
-            # If standard input is provided in tests or piped script, handle it:
-            is_mocked_or_piped = (
-                hasattr(input, "side_effect")
-                or hasattr(input, "return_value")
-                or hasattr(input, "assert_called")
-                or (hasattr(sys.stdin, "isatty") and not sys.stdin.isatty())
+            # Detect test environments where builtins.input is mocked by unittest.mock.
+            # Do NOT use sys.stdin.isatty() — VS Code's integrated terminal returns
+            # isatty()=False even in a real interactive session, which causes ULTRON
+            # to immediately exit on EOFError. Mock detection only via MagicMock attrs.
+            import builtins as _builtins
+            _input_fn = _builtins.input
+            is_test_mocked = (
+                hasattr(_input_fn, "side_effect")
+                or hasattr(_input_fn, "return_value")
+                or hasattr(_input_fn, "assert_called")
+                or hasattr(_input_fn, "_mock_name")
             )
 
-            if is_mocked_or_piped:
+            if is_test_mocked:
                 try:
-                    user_input = input("").strip()
+                    user_input = _input_fn("").strip()
                 except (KeyboardInterrupt, EOFError):
                     break
             else:
-                # Live hands-free voice mode: wait for voice events from the mic thread
+                # Live hands-free voice mode: mic thread handles all spoken input.
+                # Main thread just keeps the process alive.
                 _stop_workers.wait(timeout=0.2)
                 continue
 
