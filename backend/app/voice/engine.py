@@ -59,7 +59,7 @@ class VoiceSessionState(Enum):
 
 # Wake words that activate ULTRON from STANDBY
 WAKE_WORD_PATTERN = re.compile(
-    r"(?i)^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron|electron|oltron|autron|halton|alton|old\s*run|old\s*tron|all\s*turn|all\s*run|eltron|el\s*run|eldon|alter|altar|all\s*train|all\s*tone|all\s*town|ultra\s*on)(?:[,.!?\s]+(.*))?$"
+    r"(?i)^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron|electron|oltron|autron)(?:[,.!?\s]+(.*))?$"
 )
 
 # Natural confirmation patterns
@@ -238,16 +238,22 @@ class VoiceSession:
                 if stt_event.event_type == STTEventType.SPEECH_STARTED:
                     if stt_event.utterance_id > self.current_utterance_id:
                         self.current_utterance_id = stt_event.utterance_id
+                        # When speaking aloud, any speech cuts in
+                        if self.state == VoiceSessionState.SPEAKING:
+                            await self._trigger_barge_in()
+
+                elif stt_event.event_type == STTEventType.PARTIAL_TRANSCRIPT:
+                    if self.on_transcript and stt_event.text:
+                        self.on_transcript(stt_event.text, False)
+                    # Explicit stop/cancel keywords interrupt even during processing
+                    p_text = (stt_event.text or "").lower()
+                    if any(kw in p_text for kw in ("stop", "cancel", "halt", "abort", "quiet")):
                         if self.state in [
                             VoiceSessionState.PROCESSING,
                             VoiceSessionState.THINKING,
                             VoiceSessionState.SPEAKING,
                         ]:
                             await self._trigger_barge_in()
-
-                elif stt_event.event_type == STTEventType.PARTIAL_TRANSCRIPT:
-                    if self.on_transcript and stt_event.text:
-                        self.on_transcript(stt_event.text, False)
 
                 elif stt_event.event_type == STTEventType.FINAL_TRANSCRIPT:
                     text = stt_event.text.strip()

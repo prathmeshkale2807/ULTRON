@@ -115,14 +115,7 @@ public class UltronSTTBridge {
                 "Hey ULTRON", "ULTRON", "Hey Ultron", "Ultron",
                 "Hey Altron", "Altron", "Hey Ultra", "Ultra",
                 "Hey Elton", "Elton", "Hey Alltron", "Alltron",
-                "Hey Electron", "Electron", "Hey Oltron", "Oltron",
-                "Hey Autron", "Autron", "Hey Halton", "Halton",
-                "Hey Alton", "Alton", "Hey Old run", "Old run",
-                "Hey All turn", "All turn", "Hey All run", "All run",
-                "Hey Eltron", "Eltron", "Hey Eldon", "Eldon",
-                "Hey Alter", "Alter", "Hey Altar", "Altar",
-                "Hey All train", "All train", "Hey All tone", "All tone",
-                "Hey All town", "All town", "Hey Ultra on", "Ultra on"
+                "Hey Electron", "Electron"
             });
 
             var commands = new Choices(new string[] {

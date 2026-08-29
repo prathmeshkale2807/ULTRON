@@ -129,7 +129,7 @@ class LocalWindowsTTSProvider(TTSProvider):
             "$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
             "$synth.SelectVoice('Microsoft David Desktop'); "
             "$synth.SetOutputToDefaultAudioDevice(); "
-            "$synth.Rate = -2; "
+            "$synth.Rate = 1; "
             "$synth.Volume = 100; "
             f'$synth.Speak("{cleaned}");'
         )

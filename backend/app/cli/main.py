@@ -382,7 +382,7 @@ async def _voice_main(db, session_id: str, conversation_id: str, principal_id: s
 
 
 WAKE_WORD_PATTERN = re.compile(
-    r"(?i)^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron|electron|oltron|autron|halton|alton|old\s*run|old\s*tron|all\s*turn|all\s*run|eltron|el\s*run|eldon|alter|altar|all\s*train|all\s*tone|all\s*town|ultra\s*on)(?:[,.!?\s]+(.*))?$"
+    r"(?i)^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron|electron|oltron|autron)(?:[,.!?\s]+(.*))?$"
 )
 
 
