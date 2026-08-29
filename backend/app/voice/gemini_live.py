@@ -237,7 +237,6 @@ class UltronLive:
                 pass
 
     def _get_config(self):
-        from google import genai
         from google.genai import types
 
         return types.LiveConnectConfig(
@@ -249,14 +248,8 @@ class UltronLive:
                     )
                 )
             ),
-            realtime_input_config=types.RealtimeInputConfig(
-                voice_activity_detection=types.VoiceActivityDetection(
-                    start_of_speech_sensitivity=types.StartSensitivity.START_SENSITIVITY_HIGH,
-                    end_of_speech_sensitivity=types.EndSensitivity.END_SENSITIVITY_LOW,
-                    prefix_padding_ms=PREFIX_PADDING_MS,
-                    silence_duration_ms=SILENCE_DURATION_MS,
-                )
-            ),
+            # automatic_activity_detection is the correct field in genai 2.20
+            # Leave as default (enabled) — Gemini handles VAD natively
             output_audio_transcription=types.AudioTranscriptionConfig(),
             input_audio_transcription=types.AudioTranscriptionConfig(),
             system_instruction=types.Content(
