@@ -109,23 +109,54 @@ public class UltronSTTBridge {
             );
             _engine.SetInputToDefaultAudioDevice();
 
-            _engine.UpdateRecognizerSetting("CFGConfidenceRejectionThreshold", 20);
+            _engine.UpdateRecognizerSetting("CFGConfidenceRejectionThreshold", 10);
 
-            var choices = new Choices();
-            choices.Add(new string[] {
+            var wakePhrases = new Choices(new string[] {
                 "Hey ULTRON", "ULTRON", "Hey Ultron", "Ultron",
                 "Hey Altron", "Altron", "Hey Ultra", "Ultra",
                 "Hey Elton", "Elton", "Hey Alltron", "Alltron",
-                "Open Notepad", "Close Notepad", "Open Chrome", "Close Chrome",
-                "Take screenshot", "Take a screenshot", "Go to YouTube",
-                "Search for Iron Man", "What time is it", "Stop", "Emergency stop",
-                "yes", "no", "confirm", "cancel", "proceed", "goodbye"
+                "Hey Electron", "Electron", "Hey Oltron", "Oltron",
+                "Hey Autron", "Autron", "Hey Halton", "Halton",
+                "Hey Alton", "Alton", "Hey Old run", "Old run",
+                "Hey All turn", "All turn", "Hey All run", "All run",
+                "Hey Eltron", "Eltron", "Hey Eldon", "Eldon",
+                "Hey Alter", "Alter", "Hey Altar", "Altar",
+                "Hey All train", "All train", "Hey All tone", "All tone",
+                "Hey All town", "All town", "Hey Ultra on", "Ultra on"
             });
-            var gb = new GrammarBuilder(choices);
-            var custom = new Grammar(gb) { Priority = 127 };
-            _engine.LoadGrammar(custom);
 
+            var commands = new Choices(new string[] {
+                "Open Notepad", "Close Notepad", "Open Chrome", "Close Chrome",
+                "Open Calculator", "Close Calculator", "Open Explorer", "Open File Explorer",
+                "Write hello", "Write hello world", "Type hello", "Type hello world",
+                "Take screenshot", "Take a screenshot", "Capture screen",
+                "Go to YouTube", "Open YouTube", "Go to Google", "Open Google",
+                "Search for NVIDIA", "Search for Iron Man", "Search NVIDIA",
+                "What time is it", "What is the time", "Who are you",
+                "Stop", "Emergency stop", "Ultron stop", "Ultron emergency stop",
+                "yes", "no", "confirm", "cancel", "proceed", "goodbye", "sleep", "standby"
+            });
+
+            // 1. Standalone wake words
+            var gbWake = new GrammarBuilder(wakePhrases);
+            var gWake = new Grammar(gbWake) { Priority = 127 };
+            _engine.LoadGrammar(gWake);
+
+            // 2. Standalone commands
+            var gbCmd = new GrammarBuilder(commands);
+            var gCmd = new Grammar(gbCmd) { Priority = 126 };
+            _engine.LoadGrammar(gCmd);
+
+            // 3. Wake word + command compound ("Hey ULTRON open Notepad")
+            var gbCompound = new GrammarBuilder();
+            gbCompound.Append(wakePhrases);
+            gbCompound.Append(commands);
+            var gCompound = new Grammar(gbCompound) { Priority = 127 };
+            _engine.LoadGrammar(gCompound);
+
+            // 4. Freeform dictation grammar
             var dictation = new DictationGrammar();
+            dictation.Priority = 0;
             _engine.LoadGrammar(dictation);
 
             _engine.SpeechRecognized += (s, e) => {
