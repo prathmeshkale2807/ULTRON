@@ -109,7 +109,7 @@ public class UltronSTTBridge {
             );
             _engine.SetInputToDefaultAudioDevice();
 
-            _engine.UpdateRecognizerSetting("CFGConfidenceRejectionThreshold", 10);
+            _engine.UpdateRecognizerSetting("CFGConfidenceRejectionThreshold", 25);
 
             var wakePhrases = new Choices(new string[] {
                 "Hey ULTRON", "ULTRON", "Hey Ultron", "Ultron",
@@ -126,15 +126,28 @@ public class UltronSTTBridge {
             });
 
             var commands = new Choices(new string[] {
-                "Open Notepad", "Close Notepad", "Open Chrome", "Close Chrome",
-                "Open Calculator", "Close Calculator", "Open Explorer", "Open File Explorer",
+                "Open Notepad", "Close Notepad", "Launch Notepad", "Exit Notepad",
+                "Open Chrome", "Close Chrome", "Launch Chrome", "Exit Chrome",
+                "Open Calculator", "Close Calculator", "Launch Calculator",
+                "Open Explorer", "Open File Explorer", "Launch Explorer",
+                "Open Edge", "Close Edge", "Open Settings",
                 "Write hello", "Write hello world", "Type hello", "Type hello world",
-                "Take screenshot", "Take a screenshot", "Capture screen",
+                "Write test", "Type test", "Write message",
+                "Take screenshot", "Take a screenshot", "Capture screen", "Screenshot",
                 "Go to YouTube", "Open YouTube", "Go to Google", "Open Google",
+                "Go to Reddit", "Open Reddit", "Go to GitHub", "Open GitHub",
                 "Search for NVIDIA", "Search for Iron Man", "Search NVIDIA",
-                "What time is it", "What is the time", "Who are you",
+                "Search Google", "Search YouTube",
+                "What's my phone battery", "What is my phone battery", "Check phone battery", "Phone battery",
+                "What is my battery", "What's my battery", "Battery status",
+                "Open WhatsApp on my phone", "Open WhatsApp", "Open Messages",
+                "Turn Bluetooth on", "Turn Bluetooth off", "Turn Wi-Fi on", "Turn Wi-Fi off",
+                "Get phone location", "Where is my phone",
+                "What time is it", "What is the time", "Who are you", "What can you do",
+                "Status", "System status", "Help",
                 "Stop", "Emergency stop", "Ultron stop", "Ultron emergency stop",
-                "yes", "no", "confirm", "cancel", "proceed", "goodbye", "sleep", "standby"
+                "yes", "no", "confirm", "cancel", "proceed", "sure", "ok", "okay", "do it",
+                "goodbye", "sleep", "standby", "exit", "quit"
             });
 
             // 1. Standalone wake words
@@ -154,13 +167,8 @@ public class UltronSTTBridge {
             var gCompound = new Grammar(gbCompound) { Priority = 127 };
             _engine.LoadGrammar(gCompound);
 
-            // 4. Freeform dictation grammar
-            var dictation = new DictationGrammar();
-            dictation.Priority = 0;
-            _engine.LoadGrammar(dictation);
-
             _engine.SpeechRecognized += (s, e) => {
-                if (e.Result != null && !string.IsNullOrWhiteSpace(e.Result.Text)) {
+                if (e.Result != null && !string.IsNullOrWhiteSpace(e.Result.Text) && e.Result.Confidence >= 0.25f) {
                     Console.WriteLine("MIC_TRANSCRIPT:" + e.Result.Text);
                     Console.Out.Flush();
                 }
