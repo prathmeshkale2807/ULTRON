@@ -47,7 +47,7 @@ class AutomationResponse(BaseModel):
     expires_at: Optional[datetime]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class AutomationRunResponse(BaseModel):
     id: str
@@ -63,4 +63,4 @@ class AutomationRunResponse(BaseModel):
     error_summary: Optional[str]
 
     class Config:
-        orm_mode = True
+        from_attributes = True
