@@ -211,10 +211,6 @@ def _status_icon(status: str) -> str:
 
 
 def _print_startup_dashboard(health: dict) -> None:
-    mic = get_microphone_info()
-    stt_ok = is_stt_available()
-    tts_ok = is_tts_available()
-
     col = 22
     print()
     print(_cyan("    =============================================="))
@@ -227,18 +223,16 @@ def _print_startup_dashboard(health: dict) -> None:
     print(f"    {'AI Provider':<{col}}{_status_icon(_component_status(health, 'ai_provider'))}")
     print(f"    {'Security':<{col}}{_green('[ACTIVE]')}")
     print(f"    {'Tool Registry':<{col}}{_status_icon(_component_status(health, 'windows_control'))}")
-    print(f"    {'Voice Engine':<{col}}{_status_icon(_component_status(health, 'voice_engine'))}")
-    print(f"    {'Microphone':<{col}}{_status_icon('ready' if mic['available'] else 'unavailable')}")
-    print(f"    {'TTS':<{col}}{_status_icon('ready' if tts_ok else 'unavailable')}")
-    print(f"    {'Speech Recognition':<{col}}{_status_icon('ready' if stt_ok else 'unavailable')}")
-    print(f"    {'Speech Synthesis':<{col}}{_status_icon('ready' if tts_ok else 'unavailable')}")
+    print(f"    {'Voice Engine':<{col}}{_green('[GEMINI LIVE]')}")
+    print(f"    {'Microphone':<{col}}{_green('[READY]')}")
+    print(f"    {'Speaker':<{col}}{_green('[READY]')}")
     print()
     print(_cyan("    =============================================="))
     print()
     print("    ULTRON is ready.")
     print()
-    print("    Wake phrase:")
-    print(_bold('        "Hey ULTRON"'))
+    print("    Speak naturally. No wake word needed.")
+    print(_bold('    Just talk — ULTRON is always listening.'))
     print()
 
 
@@ -345,40 +339,61 @@ def _on_response(text: str) -> None:
         print()
 
 
-# ── Core async voice runtime ──────────────────────────────────────────────────
-async def _voice_main(db, session_id: str, conversation_id: str, principal_id: str) -> None:
+# ── Gemini Live voice runtime ─────────────────────────────────────────────────
+async def _voice_main(session_id: str, conversation_id: str) -> None:
     """
-    Start VoiceAssistant and keep it running until Ctrl+C or SIGINT.
-    VoiceSession owns the STT + TTS lifecycle — no duplication here.
+    Start the Gemini Live voice pipeline.
+    AudioEngine handles raw PCM mic/speaker I/O.
+    UltronLive streams audio to Gemini and plays responses.
+    All AI responses route through ULTRON's backend conversation API.
     """
-    from app.voice.assistant import VoiceAssistant, set_active_voice_assistant
+    from app.voice.gemini_live import AudioEngine, UltronLive
 
-    assistant = VoiceAssistant(
-        db=db,
-        principal_id=principal_id,
-        session_id=session_id,
-        conversation_id=conversation_id,
-        start_in_standby=True,
-        on_state_change=_on_state_change,
-        on_transcript=_on_transcript,
-        on_response=_on_response,
-        turn_handler=send_message,
+    def _state_cb(state: str) -> None:
+        _state.voice_state = state
+        print(_dim(f"  [{state}]"), flush=True)
+
+    def _transcript_cb(text: str, is_final: bool) -> None:
+        if is_final and text:
+            print(_cyan(f"  YOU: {text}"), flush=True)
+
+    def _response_cb(text: str) -> None:
+        if text:
+            print()
+            print(_bold("ULTRON:") + f" {text}", flush=True)
+            print()
+
+    audio = AudioEngine()
+    try:
+        audio.start()
+    except Exception as exc:
+        print(_red(f"  ERROR: Could not start audio: {exc}"))
+        print(_yellow("  Install sounddevice: pip install sounddevice"))
+        return
+
+    live = UltronLive(
+        audio=audio,
+        send_message_fn=send_message,
+        on_transcript=_transcript_cb,
+        on_response=_response_cb,
+        on_state_change=_state_cb,
     )
-    set_active_voice_assistant(assistant)
 
-    await assistant.start()
-    _show_state("STANDBY")
-    print()
+    live_task = asyncio.create_task(live.run())
 
     try:
-        # Keep the event loop alive until _stop_event is set (Ctrl+C → main())
         while not _stop_event.is_set():
             await asyncio.sleep(0.2)
     except asyncio.CancelledError:
         pass
     finally:
-        await assistant.stop()
-        set_active_voice_assistant(None)
+        live.stop()
+        live_task.cancel()
+        try:
+            await live_task
+        except (asyncio.CancelledError, Exception):
+            pass
+        audio.stop()
 
 
 WAKE_WORD_PATTERN = re.compile(
@@ -508,33 +523,17 @@ def main() -> None:
             print()
         return
 
-    # ── LIVE VOICE MODE: start VoiceAssistant (the one real voice pipeline) ──
-    # Open a DB session for VoiceSession/ConversationManager
-    from app.core.database import get_db
-    db_gen = get_db()
-    db = next(db_gen)
-
+    # ── LIVE VOICE MODE: Gemini Live pipeline ─────────────────────────────────
     try:
         asyncio.run(
             _voice_main(
-                db=db,
                 session_id=_state.session_id,
                 conversation_id=_state.conversation_id,
-                principal_id="local",
             )
         )
     except KeyboardInterrupt:
         _stop_event.set()
     finally:
-
-        # Close DB session
-        try:
-            db_gen.send(None)
-        except StopIteration:
-            pass
-        except Exception:
-            pass
-
         invalidate_session()
         print()
         print(_dim("  Closing session..."))
