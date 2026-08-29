@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    ULTRON One-Command JARVIS Launcher — Phase 4
+    ULTRON One-Command JARVIS Launcher
 
 .DESCRIPTION
     Single-command entry point for the ULTRON JARVIS personal AI assistant.
@@ -12,8 +12,8 @@
        - If already running: connects to it without starting a duplicate.
        - If not running: starts it and records the exact PID.
     3. Waits for /api/health to return 200 (up to 30 seconds).
-    4. Launches the futuristic Desktop HUD UI in the browser (or Tauri if built).
-    5. Starts the ULTRON JARVIS voice assistant (microphone → AI → speaker).
+    4. Launches the futuristic Desktop HUD UI in the browser.
+    5. Starts the ULTRON JARVIS voice assistant (microphone -> AI -> speaker).
     6. On exit: only terminates the backend process started by THIS launcher.
        Never kills unrelated Python processes or all listeners on the port.
     7. Handles Ctrl+C gracefully.
@@ -41,21 +41,21 @@ if ($DebugMode) {
     $env:ULTRON_LOG_LEVEL = "DEBUG"
 }
 
-# ── Locate repository root and Python interpreter ─────────────────────────
-$Root       = Split-Path -Parent $MyInvocation.MyCommand.Path
-$Backend    = Join-Path $Root "backend"
-$Desktop    = Join-Path $Root "apps\desktop"
-$Python     = Join-Path $Backend ".venv\Scripts\python.exe"
+# Locate repository root and Python interpreter
+$Root        = Split-Path -Parent $MyInvocation.MyCommand.Path
+$Backend     = Join-Path $Root "backend"
+$Desktop     = Join-Path $Root "apps\desktop"
+$Python      = Join-Path $Backend ".venv\Scripts\python.exe"
 $NodeModules = Join-Path $Desktop "node_modules"
 
-# ── Constants ──────────────────────────────────────────────────────────────
-$BackendUrl    = "http://127.0.0.1:8756"
-$HealthUrl     = "$BackendUrl/api/health"
-$UiUrl         = "http://127.0.0.1:5173"
-$MaxWaitSec    = 30
-$PollMs        = 500
+# Constants
+$BackendUrl = "http://127.0.0.1:8756"
+$HealthUrl  = "$BackendUrl/api/health"
+$UiUrl      = "http://127.0.0.1:5173"
+$MaxWaitSec = 30
+$PollMs     = 500
 
-# ── Helper: test if backend is already healthy ─────────────────────────────
+# Helper: test if backend is already healthy
 function Test-BackendHealthy {
     try {
         $r = Invoke-WebRequest -Uri $HealthUrl -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
@@ -65,8 +65,9 @@ function Test-BackendHealthy {
     }
 }
 
-# ── Helper: test if a local server is responding ──────────────────────────
-function Test-UiReady($Url) {
+# Helper: test if a local dev server is responding
+function Test-UiReady {
+    param([string]$Url)
     try {
         $r = Invoke-WebRequest -Uri $Url -UseBasicParsing -TimeoutSec 2 -ErrorAction Stop
         return ($r.StatusCode -lt 500)
@@ -75,7 +76,7 @@ function Test-UiReady($Url) {
     }
 }
 
-# ── Verify .venv exists ───────────────────────────────────────────────────
+# Verify .venv exists
 if (-not (Test-Path $Python)) {
     Write-Host "  ERROR: Python virtual environment not found."
     Write-Host ""
@@ -88,31 +89,31 @@ if (-not (Test-Path $Python)) {
     exit 1
 }
 
-# ── Detect whether backend is already running ──────────────────────────────
-$BackendProcess  = $null   # process started BY THIS LAUNCHER (null = not started)
-$BackendOwned    = $false  # true only if we started it ourselves
-$UiProcess       = $null   # Vite dev server process (if we start it)
-$UiOwned         = $false
+# Track what this launcher started so we only clean up our own processes
+$BackendProcess = $null
+$BackendOwned   = $false
+$UiProcess      = $null
+$UiOwned        = $false
 
-# ── Auto-migrate database (always run before starting backend) ────────────
-# Idempotent: alembic upgrade head is a no-op if already at head.
+# Auto-migrate database (idempotent)
 Push-Location $Backend
 try {
     & $Python -m alembic upgrade head 2>&1 | Out-Null
 } catch { }
 Pop-Location
 
+# Start backend if not already running
 if (-not (Test-BackendHealthy)) {
     Write-Host "  [1/3] Starting ULTRON backend..."
 
-    # Ensure log directory exists
     $LogDir     = Join-Path $Backend "logs"
     $LogFileOut = Join-Path $LogDir "backend.log"
     $LogFileErr = Join-Path $LogDir "backend.err.log"
     if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 
     try {
-        $BackendProcess = Start-Process -FilePath $Python `
+        $BackendProcess = Start-Process `
+            -FilePath $Python `
             -ArgumentList "-m uvicorn app.main:app --host 127.0.0.1 --port 8756 --no-access-log" `
             -WorkingDirectory $Backend `
             -RedirectStandardOutput $LogFileOut `
@@ -133,7 +134,6 @@ if (-not (Test-BackendHealthy)) {
         exit 1
     }
 
-    # ── Wait for backend to become healthy ────────────────────────────────
     Write-Host "  [2/3] Waiting for backend to become healthy..."
 
     $Ready   = $false
@@ -170,18 +170,18 @@ if (-not (Test-BackendHealthy)) {
     Write-Host "  Backend       ALREADY ONLINE (external process)"
 }
 
-# ── Launch Futuristic Desktop HUD UI ──────────────────────────────────────
+# Launch Futuristic Desktop HUD UI
 if (-not $NoUI) {
     Write-Host "  [3/3] Launching ULTRON JARVIS Desktop HUD..."
 
     $NpmCmd = Get-Command npm -ErrorAction SilentlyContinue
 
-    if ($null -ne $NpmCmd -and (Test-Path $NodeModules)) {
-        # Start Vite dev server for the HUD UI
+    if (($null -ne $NpmCmd) -and (Test-Path $NodeModules)) {
         $UiLogOut = Join-Path (Join-Path $Backend "logs") "ui.log"
         $UiLogErr = Join-Path (Join-Path $Backend "logs") "ui.err.log"
 
-        $UiProcess = Start-Process -FilePath "npm.cmd" `
+        $UiProcess = Start-Process `
+            -FilePath "npm.cmd" `
             -ArgumentList "run", "dev" `
             -WorkingDirectory $Desktop `
             -RedirectStandardOutput $UiLogOut `
@@ -194,13 +194,13 @@ if (-not $NoUI) {
         if ($null -ne $UiProcess) {
             Write-Host "  UI Dev Server PID $($UiProcess.Id)  (logs -> backend/logs/ui.log)"
 
-            # Wait up to 15s for Vite to be ready, then open browser
-            $UiReady   = $false
+            # Wait up to 15s for Vite to be ready
             $UiElapsed = 0
+            $UiReady   = $false
             while ($UiElapsed -lt 15) {
                 Start-Sleep -Seconds 1
                 $UiElapsed++
-                if (Test-UiReady $UiUrl) {
+                if (Test-UiReady -Url $UiUrl) {
                     $UiReady = $true
                     break
                 }
@@ -210,29 +210,28 @@ if (-not $NoUI) {
                 Start-Process $UiUrl
                 Write-Host "  Desktop HUD   ONLINE -> $UiUrl"
             } else {
-                Write-Host "  Desktop HUD   Starting (browser will open when ready)"
-                # Open anyway — browser will retry
                 Start-Process $UiUrl
+                Write-Host "  Desktop HUD   Starting (browser will open when ready)"
             }
         } else {
             Write-Host "  Desktop HUD   SKIPPED (could not start npm dev server)"
         }
     } else {
-        Write-Host "  Desktop HUD   SKIPPED (npm / node_modules not found — run: npm install in apps/desktop)"
+        Write-Host "  Desktop HUD   SKIPPED (run: cd apps\desktop then npm install)"
     }
 }
 
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════════════╗"
-Write-Host "  ║         ULTRON JARVIS  —  ONLINE                 ║"
-Write-Host "  ╚══════════════════════════════════════════════════╝"
+Write-Host "  +--------------------------------------------------+"
+Write-Host "  |         ULTRON JARVIS  --  ONLINE                |"
+Write-Host "  +--------------------------------------------------+"
 Write-Host ""
 Write-Host "  Voice is the primary interface."
-Write-Host "  Wake phrase:  ""Hey ULTRON"""
-Write-Host "  HUD:          $UiUrl"
+Write-Host "  Wake phrase : Hey ULTRON"
+Write-Host "  HUD URL     : $UiUrl"
 Write-Host ""
 
-# ── Start the JARVIS Voice Assistant (microphone → AI → speaker) ──────────
+# Start the JARVIS Voice Assistant (microphone -> AI -> speaker)
 $CliExitCode = 0
 
 try {
@@ -246,7 +245,7 @@ try {
     Pop-Location
 
     # Stop Vite dev server if WE started it
-    if ($UiOwned -and $null -ne $UiProcess -and -not $UiProcess.HasExited) {
+    if ($UiOwned -and ($null -ne $UiProcess) -and (-not $UiProcess.HasExited)) {
         try {
             Stop-Process -Id $UiProcess.Id -Force -ErrorAction SilentlyContinue
             $UiProcess.WaitForExit(2000) | Out-Null
@@ -254,17 +253,14 @@ try {
         Write-Host "  Desktop HUD stopped."
     }
 
-    # Only terminate the backend process THIS LAUNCHER started.
-    # Never kill unrelated Python processes or all port-8756 listeners.
-    if ($BackendOwned -and $null -ne $BackendProcess -and -not $BackendProcess.HasExited) {
+    # Only terminate the backend process THIS LAUNCHER started
+    if ($BackendOwned -and ($null -ne $BackendProcess) -and (-not $BackendProcess.HasExited)) {
         Write-Host ""
         Write-Host "  Stopping ULTRON backend (PID $($BackendProcess.Id))..."
         try {
             Stop-Process -Id $BackendProcess.Id -Force -ErrorAction SilentlyContinue
             $BackendProcess.WaitForExit(3000) | Out-Null
-        } catch {
-            # Best-effort
-        }
+        } catch { }
         Write-Host "  Backend stopped."
     }
 
