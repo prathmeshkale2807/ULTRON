@@ -43,7 +43,8 @@ immediately and confirm concisely. You refer to the user as 'sir'.
 Keep all spoken responses brief and natural — 1-3 sentences maximum unless explaining something complex.
 Never say 'As an AI...' or 'I cannot...'. Just do it or explain why briefly."""
 
-LIVE_MODEL = "gemini-live-2.5-flash-preview"
+# Gemini Live model — confirmed working with AUDIO modality
+LIVE_MODEL = os.getenv("ULTRON_LIVE_MODEL", "models/gemini-3.1-flash-live-preview")
 
 
 class AudioEngine:
@@ -340,7 +341,7 @@ class UltronLive:
         if not api_key:
             raise RuntimeError("GEMINI_API_KEY is not set in backend/.env")
 
-        client = genai.Client(api_key=api_key, http_options={"api_version": "v1beta"})
+        client = genai.Client(api_key=api_key)
 
         self.running = True
         reconnect_delay = 0.5
