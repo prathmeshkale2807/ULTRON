@@ -73,6 +73,14 @@ if (-not (Test-Path $Python)) {
 # ── Detect whether backend is already running ──────────────────────────────
 $BackendProcess  = $null   # process started BY THIS LAUNCHER (null = not started)
 $BackendOwned    = $false  # true only if we started it ourselves
+# ── Auto-migrate database (always run before starting backend) ────────────
+# Idempotent: alembic upgrade head is a no-op if already at head.
+# This ensures tables exist even after a fresh clone or DB deletion.
+Push-Location $Backend
+try {
+    & $Python -m alembic upgrade head 2>&1 | Out-Null
+} catch { }
+Pop-Location
 
 if (-not (Test-BackendHealthy)) {
     Write-Host "  [1/2] Starting ULTRON backend..."
