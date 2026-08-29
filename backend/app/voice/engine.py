@@ -58,13 +58,14 @@ class VoiceSessionState(Enum):
 
 
 # Wake words that activate ULTRON from STANDBY
+# Kept narrow: only clear ULTRON variants, no short homophones like "ultra/electron/elton"
 WAKE_WORD_PATTERN = re.compile(
-    r"(?i)^(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron|electron|oltron|autron)(?:[,.!?\s]+(.*))?$"
+    r"(?i)^(?:hey\s+|okay\s+|ok\s+)?(?:ultron|altron|outron|oltron|autron|all\s*tron)(?:[,.!?\s]+(.*))?$"
 )
 
-# Direct commands that wake ULTRON and execute immediately even from STANDBY
+# Direct commands that bypass wake word from STANDBY (must start with action verb)
 DIRECT_COMMAND_PATTERN = re.compile(
-    r"(?i)^(?:open|close|launch|exit|write|type|take|capture|go\s+to|search|what|who|how|status|system\s+status|help|where|check|turn|send|battery|do\s+it|confirm|cancel|yes|no)\b.*$"
+    r"(?i)^(?:open|close|launch|exit|write|type|take|capture|go\s+to|search|turn|send|get|show|run|start|stop|play|pause|set|find|check)\s+.+$"
 )
 
 # Natural confirmation patterns
@@ -162,6 +163,25 @@ class VoiceSession:
                 self.on_state_change(new_state)
             except Exception as e:
                 logger.warning(f"State change callback error: {e}")
+
+        # Wire STT grammar mode to voice state:
+        # LISTENING/PROCESSING/SPEAKING → dictation (free speech)
+        # STANDBY → wake-word only (no hallucination)
+        if new_state in (
+            VoiceSessionState.LISTENING,
+            VoiceSessionState.PROCESSING,
+            VoiceSessionState.THINKING,
+            VoiceSessionState.EXECUTING,
+            VoiceSessionState.SPEAKING,
+            VoiceSessionState.WAKE_DETECTED,
+        ):
+            self.stt.set_listening_mode()
+        elif new_state in (
+            VoiceSessionState.STANDBY,
+            VoiceSessionState.IDLE,
+            VoiceSessionState.CLOSED,
+        ):
+            self.stt.set_standby_mode()
 
     def _reset_watchdog(self) -> None:
         try:
@@ -458,6 +478,12 @@ class VoiceSession:
                 logger.info("Generation stale, dropping.")
                 return
 
+            # Ensure response is always a non-empty string
+            if not response or not str(response).strip():
+                response = "Done."
+
+            response = str(response).strip()
+
             if self.on_response:
                 self.on_response(response)
 
@@ -472,13 +498,21 @@ class VoiceSession:
             logger.info("Generation task cancelled via barge-in.")
         except Exception as e:
             logger.error(f"Generation Error: {e}")
-            if self.state in [
+            # Always recover to LISTENING so ULTRON doesn't get stuck
+            if gen_id == self.generation_id and self.state in [
                 VoiceSessionState.PROCESSING,
                 VoiceSessionState.THINKING,
                 VoiceSessionState.SPEAKING,
             ]:
-                self.set_state(VoiceSessionState.LISTENING)
-                self._reset_watchdog()
+                error_msg = "I encountered an error. Please try again."
+                try:
+                    await self.tts.stream_text(error_msg)
+                    await self.tts.flush()
+                    self.set_state(VoiceSessionState.SPEAKING)
+                    self.tts_task = asyncio.create_task(self._stream_tts(gen_id))
+                except Exception:
+                    self.set_state(VoiceSessionState.LISTENING)
+                    self._reset_watchdog()
 
     async def _stream_tts(self, gen_id: int) -> None:
         try:

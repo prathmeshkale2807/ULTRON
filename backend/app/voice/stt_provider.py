@@ -1,9 +1,11 @@
 """
 ULTRON Speech-To-Text Providers.
 
-LocalWindowsSTTProvider: real Windows SAPI continuous recognition using a
-background PowerShell/C# SpeechRecognitionEngine subprocess. Audio is
-captured directly from the system default microphone.
+Two-mode SAPI bridge:
+  - STANDBY mode: narrow fixed grammar (wake words only) → no hallucinations
+  - LISTENING mode: free dictation grammar → captures any spoken command
+
+Mode switching is done via stdin commands sent to the bridge process.
 
 MockSTTProvider: accepts raw text bytes for unit testing.
 """
@@ -57,6 +59,14 @@ class STTProvider(ABC):
         """Closes the connection."""
         pass
 
+    def set_listening_mode(self) -> None:
+        """Switch to free dictation (LISTENING state). Override in implementations."""
+        pass
+
+    def set_standby_mode(self) -> None:
+        """Switch to wake-word-only grammar (STANDBY state). Override in implementations."""
+        pass
+
 
 class MockSTTProvider(STTProvider):
     """A mock provider for testing that yields string transcripts from byte strings."""
@@ -93,14 +103,22 @@ class MockSTTProvider(STTProvider):
         await self.queue.put(b"__CLOSE__")
 
 
+# Two-mode SAPI bridge:
+#   CMD_STANDBY  → load only wake-word grammar (narrow, no hallucination)
+#   CMD_LISTEN   → load dictation grammar (free speech for commands)
 _SAPI_BRIDGE_PS = r"""
 $ProgressPreference = 'SilentlyContinue'
 $csharp = @"
 using System;
 using System.Speech.Recognition;
+using System.Threading;
 
 public class UltronSTTBridge {
     private SpeechRecognitionEngine _engine;
+    private Grammar _wakeGrammar;
+    private Grammar _dictGrammar;
+    private bool _dictMode = false;
+    private readonly object _lock = new object();
 
     public void Start() {
         try {
@@ -108,60 +126,30 @@ public class UltronSTTBridge {
                 new System.Globalization.CultureInfo("en-US")
             );
             _engine.SetInputToDefaultAudioDevice();
+            _engine.UpdateRecognizerSetting("CFGConfidenceRejectionThreshold", 30);
+            _engine.EndSilenceTimeout = TimeSpan.FromSeconds(0.8);
+            _engine.BabbleTimeout = TimeSpan.FromSeconds(0.0);
 
-            _engine.UpdateRecognizerSetting("CFGConfidenceRejectionThreshold", 25);
-
-            var wakePhrases = new Choices(new string[] {
-                "Hey ULTRON", "ULTRON", "Hey Ultron", "Ultron",
-                "Hey Altron", "Altron", "Hey Ultra", "Ultra",
-                "Hey Elton", "Elton", "Hey Alltron", "Alltron",
-                "Hey Electron", "Electron"
+            // --- Wake-word grammar (narrow, high confidence) ---
+            var wakeChoices = new Choices(new string[] {
+                "Hey ULTRON", "Hey Ultron", "ULTRON", "Ultron",
+                "Hey Ultra", "Ultra run", "Okay ULTRON", "OK ULTRON"
             });
+            var gbWake = new GrammarBuilder(wakeChoices);
+            _wakeGrammar = new Grammar(gbWake) { Name = "Wake", Priority = 127 };
 
-            var commands = new Choices(new string[] {
-                "Open Notepad", "Close Notepad", "Launch Notepad", "Exit Notepad",
-                "Open Chrome", "Close Chrome", "Launch Chrome", "Exit Chrome",
-                "Open Calculator", "Close Calculator", "Launch Calculator",
-                "Open Explorer", "Open File Explorer", "Launch Explorer",
-                "Open Edge", "Close Edge", "Open Settings",
-                "Write hello", "Write hello world", "Type hello", "Type hello world",
-                "Write test", "Type test", "Write message",
-                "Take screenshot", "Take a screenshot", "Capture screen", "Screenshot",
-                "Go to YouTube", "Open YouTube", "Go to Google", "Open Google",
-                "Go to Reddit", "Open Reddit", "Go to GitHub", "Open GitHub",
-                "Search for NVIDIA", "Search for Iron Man", "Search NVIDIA",
-                "Search Google", "Search YouTube",
-                "What's my phone battery", "What is my phone battery", "Check phone battery", "Phone battery",
-                "What is my battery", "What's my battery", "Battery status",
-                "Open WhatsApp on my phone", "Open WhatsApp", "Open Messages",
-                "Turn Bluetooth on", "Turn Bluetooth off", "Turn Wi-Fi on", "Turn Wi-Fi off",
-                "Get phone location", "Where is my phone",
-                "What time is it", "What is the time", "Who are you", "What can you do",
-                "Status", "System status", "Help",
-                "Stop", "Emergency stop", "Ultron stop", "Ultron emergency stop",
-                "yes", "no", "confirm", "cancel", "proceed", "sure", "ok", "okay", "do it",
-                "goodbye", "sleep", "standby", "exit", "quit"
-            });
+            // --- Dictation grammar (free speech) ---
+            _dictGrammar = new DictationGrammar();
+            _dictGrammar.Name = "Dictation";
+            _dictGrammar.Priority = 100;
 
-            // 1. Standalone wake words
-            var gbWake = new GrammarBuilder(wakePhrases);
-            var gWake = new Grammar(gbWake) { Priority = 127 };
-            _engine.LoadGrammar(gWake);
-
-            // 2. Standalone commands
-            var gbCmd = new GrammarBuilder(commands);
-            var gCmd = new Grammar(gbCmd) { Priority = 126 };
-            _engine.LoadGrammar(gCmd);
-
-            // 3. Wake word + command compound ("Hey ULTRON open Notepad")
-            var gbCompound = new GrammarBuilder();
-            gbCompound.Append(wakePhrases);
-            gbCompound.Append(commands);
-            var gCompound = new Grammar(gbCompound) { Priority = 127 };
-            _engine.LoadGrammar(gCompound);
+            // Start in standby mode: wake words only
+            _engine.LoadGrammar(_wakeGrammar);
 
             _engine.SpeechRecognized += (s, e) => {
-                if (e.Result != null && !string.IsNullOrWhiteSpace(e.Result.Text) && e.Result.Confidence >= 0.25f) {
+                if (e.Result != null
+                    && !string.IsNullOrWhiteSpace(e.Result.Text)
+                    && e.Result.Confidence >= 0.30f) {
                     Console.WriteLine("MIC_TRANSCRIPT:" + e.Result.Text);
                     Console.Out.Flush();
                 }
@@ -170,9 +158,51 @@ public class UltronSTTBridge {
             _engine.RecognizeAsync(RecognizeMode.Multiple);
             Console.WriteLine("MIC_READY");
             Console.Out.Flush();
+
+            // Read mode-switch commands from stdin on a background thread
+            Thread stdinReader = new Thread(() => {
+                string line;
+                while ((line = Console.In.ReadLine()) != null) {
+                    line = line.Trim().ToUpperInvariant();
+                    if (line == "CMD_LISTEN") {
+                        SetDictationMode(true);
+                    } else if (line == "CMD_STANDBY") {
+                        SetDictationMode(false);
+                    }
+                }
+            });
+            stdinReader.IsBackground = true;
+            stdinReader.Start();
+
+            // Keep alive
+            while (true) { Thread.Sleep(100); }
+
         } catch (Exception ex) {
             Console.WriteLine("MIC_ERROR:" + ex.Message);
             Console.Out.Flush();
+        }
+    }
+
+    private void SetDictationMode(bool dictation) {
+        lock (_lock) {
+            if (dictation == _dictMode) return;
+            _dictMode = dictation;
+            try {
+                _engine.RecognizeAsyncStop();
+                _engine.UnloadAllGrammars();
+                if (dictation) {
+                    _engine.LoadGrammar(_dictGrammar);
+                    _engine.LoadGrammar(_wakeGrammar);
+                } else {
+                    _engine.LoadGrammar(_wakeGrammar);
+                }
+                _engine.RecognizeAsync(RecognizeMode.Multiple);
+                Console.WriteLine(dictation ? "MODE_LISTEN" : "MODE_STANDBY");
+                Console.Out.Flush();
+            } catch (Exception ex) {
+                Console.WriteLine("MIC_ERROR:ModeSwitch:" + ex.Message);
+                Console.Out.Flush();
+            }
         }
     }
 }
@@ -187,10 +217,6 @@ try {
 
 $bridge = New-Object UltronSTTBridge
 $bridge.Start()
-
-while ($true) {
-    [System.Threading.Thread]::Sleep(100)
-}
 """
 
 
@@ -204,6 +230,7 @@ def launch_sapi_bridge() -> Optional[subprocess.Popen]:
             ["powershell", "-NoProfile", "-NonInteractive", "-EncodedCommand", enc],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
+            stdin=subprocess.PIPE,
             text=True,
             bufsize=1,
         )
@@ -216,9 +243,9 @@ class LocalWindowsSTTProvider(STTProvider):
     """
     Local Windows SAPI Speech-To-Text Provider.
 
-    Launches a background PowerShell/C# SpeechRecognitionEngine process that
-    captures audio directly from the default microphone. Transcripts are
-    produced as real speech recognition text from the Windows microphone.
+    Two-mode: STANDBY (wake words only, narrow grammar) and
+    LISTENING (DictationGrammar + wake words, free speech).
+    Mode switching via stdin commands to the bridge process.
     """
 
     def __init__(self):
@@ -227,6 +254,7 @@ class LocalWindowsSTTProvider(STTProvider):
         self._utterance_counter = 0
         self._process: Optional[subprocess.Popen] = None
         self._reader_thread: Optional[threading.Thread] = None
+        self._mode = "standby"
         if sys.platform == "win32":
             self._start()
 
@@ -254,6 +282,8 @@ class LocalWindowsSTTProvider(STTProvider):
                 line = line.strip()
                 if line == "MIC_READY":
                     logger.info("STT provider: microphone bridge ready")
+                elif line in ("MODE_LISTEN", "MODE_STANDBY"):
+                    logger.info(f"STT bridge: {line}")
                 elif line.startswith("MIC_TRANSCRIPT:"):
                     text = line[len("MIC_TRANSCRIPT:"):].strip()
                     if text:
@@ -265,13 +295,38 @@ class LocalWindowsSTTProvider(STTProvider):
                             event_type=STTEventType.FINAL_TRANSCRIPT, utterance_id=uid, text=text))
                         self._sync_queue.put(STTMessage(
                             event_type=STTEventType.SPEECH_ENDED, utterance_id=uid))
+                elif line.startswith("MIC_ERROR:"):
+                    logger.error(f"STT bridge error: {line}")
         except Exception as e:
             logger.debug(f"STT reader loop ended: {e}")
 
+    def _send_command(self, cmd: str) -> None:
+        """Send a mode-switch command to the bridge via stdin."""
+        if self._process and self._process.poll() is None:
+            try:
+                self._process.stdin.write(cmd + "\n")
+                self._process.stdin.flush()
+            except Exception as e:
+                logger.debug(f"STT stdin write error: {e}")
+
+    def set_listening_mode(self) -> None:
+        """Switch bridge to DictationGrammar (free speech for commands)."""
+        if self._mode != "listen":
+            self._mode = "listen"
+            self._send_command("CMD_LISTEN")
+            logger.info("STT: switched to LISTEN mode (dictation)")
+
+    def set_standby_mode(self) -> None:
+        """Switch bridge to wake-word-only grammar."""
+        if self._mode != "standby":
+            self._mode = "standby"
+            self._send_command("CMD_STANDBY")
+            logger.info("STT: switched to STANDBY mode (wake words only)")
+
     async def stream_audio(self, audio_chunk: bytes) -> None:
         """
-        Accepts audio chunks. If mock text bytes are passed in tests or simulated input,
-        decodes and puts to queue; otherwise real audio is captured by the SAPI bridge.
+        Accepts audio chunks for tests/simulated input.
+        Real audio is captured directly by the SAPI bridge.
         """
         if not self.closed and audio_chunk:
             try:
@@ -333,10 +388,10 @@ def get_stt_provider() -> STTProvider:
     ):
         return MockSTTProvider()
 
-    # 2. Deepgram (cloud STT)
+    # 2. Deepgram (cloud STT) — if API key is set
     key = os.getenv("DEEPGRAM_API_KEY")
     if key and key != "not_configured":
-        pass
+        pass  # future: return DeepgramSTTProvider()
 
     # 3. Local Windows SAPI (default on Windows for live runtime)
     if sys.platform == "win32":
