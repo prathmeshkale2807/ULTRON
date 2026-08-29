@@ -1,8 +1,22 @@
+"""
+ULTRON Terminal CLI — JARVIS Experience (Phase 28 & 29).
+
+Provides single-process interactive terminal with:
+  - Startup diagnostic dashboard
+  - Spoken TTS announcement on boot
+  - Continuous background microphone Speech Recognition (Windows SAPI)
+  - JARVIS-style wake word ('Hey ULTRON') activation into [LISTENING]
+  - Continuous multi-turn conversation without repeating wake word
+  - Automatic return to [STANDBY] after 15s inactivity watchdog
+  - Natural confirmation broker resolution ('yes' / 'no')
+  - Emergency stop ('ultron stop' / 'emergency stop')
+"""
 from __future__ import annotations
 
 import base64
 import logging
 import os
+import queue
 import re
 import subprocess
 import sys
@@ -65,8 +79,13 @@ _turn_lock = threading.Lock()
 _mic_subprocess: subprocess.Popen | None = None
 
 # Wake word and natural control patterns
-WAKE_WORD_PATTERN = re.compile(r"(?i)^(?:hey\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron)(?:[,.!?\s]+(.*))?$")
+WAKE_WORD_PATTERN = re.compile(
+    r"(?i)^(?:hey\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron)(?:[,.!?\s]+(.*))?$"
+)
 EMERGENCY_STOP_PATTERN = re.compile(r"(?i)^ultron,?\s+(?:emergency\s+)?stop\.?$")
+EXIT_PATTERN = re.compile(
+    r"(?i)^(?:goodbye|stop\s+listening|exit\s+conversation|sleep|standby|go\s+to\s+sleep)\.?$"
+)
 CONFIRM_YES_PATTERN = re.compile(
     r"(?i)^(?:yes(?:,?\s+(?:do\s+it|please|confirm|proceed))?|confirm|go\s+ahead|continue|sure|yep|yeah|proceed|approved|do\s+it|ok|okay)[.!]?$"
 )
@@ -183,6 +202,7 @@ def _do_speak(text: str) -> None:
         cleaned = cleaned[:997] + "..."
     # Microsoft David Desktop: calm, clear, professional male voice (JARVIS-style)
     ps_code = (
+        "$ProgressPreference = 'SilentlyContinue'; "
         "Add-Type -AssemblyName System.Speech; "
         "$s = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
         "$s.SelectVoice('Microsoft David Desktop'); "
@@ -212,14 +232,12 @@ def speak_text(text: str) -> None:
         return
 
     def _worker() -> None:
-        with _tts_lock:  # serialize: only one utterance at a time
-            _is_speaking.set()   # signal mic loop to pause reading
+        with _tts_lock:
+            _is_speaking.set()
             try:
-                # Briefly suspend mic subprocess to release SAPI audio device
-                global _mic_subprocess
                 _do_speak(text)
             finally:
-                _is_speaking.clear()  # mic loop may resume
+                _is_speaking.clear()
 
     threading.Thread(target=_worker, daemon=True, name="ultron-tts-speaker").start()
 
@@ -244,58 +262,64 @@ def _poll_confirmations_once() -> list[dict]:
         resp = requests.get(f"{BACKEND_URL}/api/confirmations/pending", headers=_headers(), timeout=3)
         if not resp.ok:
             return []
-        return [c for c in resp.json() if c["id"] not in _seen_confirmations]
+        data = resp.json()
+        if not isinstance(data, list):
+            return []
+        return [c for c in data if isinstance(c, dict) and "id" in c and c["id"] not in _seen_confirmations]
     except Exception:
         return []
 
 
-def _resolve_confirmation(request_id: str, approved: bool) -> None:
+def _resolve_confirmation(confirmation_id: str, approved: bool) -> bool:
+    endpoint = "approve" if approved else "deny"
     try:
-        requests.post(
-            f"{BACKEND_URL}/api/confirmations/{request_id}/resolve",
+        resp = requests.post(
+            f"{BACKEND_URL}/api/confirmations/{confirmation_id}/{endpoint}",
             headers=_headers(),
-            json={"approved": approved, "resolved_by": "cli_user"},
             timeout=5,
         )
+        return resp.ok
     except Exception:
-        pass
+        return False
 
 
 def handle_pending_confirmations() -> None:
-    for conf in _poll_confirmations_once():
-        cid = conf["id"]
-        if cid in _seen_confirmations:
+    """Check for security confirmations requiring human approval."""
+    pending = _poll_confirmations_once()
+    for req in pending:
+        cid = req.get("id")
+        if not cid:
             continue
         _seen_confirmations.add(cid)
-        _show_state("WAITING FOR CONFIRMATION")
+        action = req.get("action", "execute tool")
+        risk = req.get("risk_level", "medium").upper()
+        tool_name = req.get("tool_name", "")
+        params = req.get("parameters", {})
+
         print()
-        print(_yellow("+----- CONFIRMATION REQUIRED ------------------+"))
-        tool_name = conf.get("tool_name", "?")
-        action = conf.get("action", "?")
-        reason = conf.get("reason", "?")
-        consequence = conf.get("important_consequence", "")
-        risk = conf.get("risk", "")
-        print(_yellow(f"|  Tool   : {tool_name}"))
-        print(_yellow(f"|  Action : {action}"))
-        print(_yellow(f"|  Reason : {reason}"))
-        if consequence:
-            print(_yellow(f"|  Impact : {consequence}"))
-        if risk:
-            print(_yellow(f"|  Risk   : {risk}"))
-        print(_yellow("+----------------------------------------------+"))
+        print(_yellow("  +--------------------------------------------------+"))
+        print(_yellow("  |") + _bold(f"  SECURITY CONFIRMATION REQUIRED  [{risk}]") + _yellow("        |"))
+        print(_yellow("  +--------------------------------------------------+"))
+        print(f"  Action   : {action}")
+        if tool_name:
+            print(f"  Tool     : {tool_name}")
+        if params:
+            print(f"  Params   : {params}")
         print()
 
-        # Speak confirmation request
-        speak_text("This action requires your confirmation. Do you want me to continue?")
+        msg = f"Confirmation required: {action}. Proceed?"
+        speak_text(msg)
+        _show_state("WAITING_FOR_CONFIRMATION")
 
-        while True:
+        while not _stop_workers.is_set():
             try:
-                ans = input(_bold("  Confirm? [y/N]: ")).strip().lower()
+                ans = input(_bold("  Approve? [y/N] > ")).strip().lower()
             except (KeyboardInterrupt, EOFError):
                 ans = "n"
-            if ans in ("y", "yes", "confirm", "proceed", "go ahead", "do it"):
+
+            if ans in ("y", "yes", "confirm", "proceed"):
                 _resolve_confirmation(cid, True)
-                speak_text("Confirmed.")
+                speak_text("Approved.")
                 print(_green("  Approved."))
                 _show_state("EXECUTING")
                 break
@@ -309,26 +333,31 @@ def handle_pending_confirmations() -> None:
 
 def _confirmation_poll_worker() -> None:
     while not _stop_workers.is_set():
-        if _state.session_id:
-            handle_pending_confirmations()
         _stop_workers.wait(timeout=_CONFIRM_POLL_INTERVAL)
 
 
+
 def _watchdog_worker() -> None:
-    """Watchdog thread — ULTRON is always listening; no inactivity timeout."""
+    """Inactivity watchdog returning LISTENING state to STANDBY after timeout."""
     while not _stop_workers.is_set():
-        # Keep active_conversation True so ULTRON never goes to STANDBY
-        _state.active_conversation = True
-        _stop_workers.wait(timeout=1.0)
+        if _state.voice_state == "LISTENING" and _state.active_conversation:
+            now = time.time()
+            if now - _state.last_activity > _state.timeout_seconds:
+                _state.active_conversation = False
+                _state.voice_state = "STANDBY"
+                sys.stdout.write(f"\n{_dim('  [STANDBY]')}\n\n")
+                sys.stdout.flush()
+        _stop_workers.wait(timeout=0.5)
 
 
 def _mic_listener_worker() -> None:
-    """Background continuous Speech Recognition worker."""
+    """Background continuous Speech Recognition worker using Windows SAPI."""
     global _mic_subprocess
     if sys.platform != "win32" or not get_microphone_info().get("available"):
         return
 
     ps_code = """
+$ProgressPreference = 'SilentlyContinue'
 $csharp = @"
 using System;
 using System.Speech.Recognition;
@@ -338,8 +367,12 @@ public class UltronMicBridge {
 
     public void Start() {
         try {
-            engine = new SpeechRecognitionEngine();
+            engine = new SpeechRecognitionEngine(
+                new System.Globalization.CultureInfo("en-US")
+            );
             engine.SetInputToDefaultAudioDevice();
+
+            engine.UpdateRecognizerSetting("CFGConfidenceRejectionThreshold", 20);
 
             Choices choices = new Choices();
             choices.Add(new string[] {
@@ -377,7 +410,13 @@ public class UltronMicBridge {
 }
 "@
 
-Add-Type -TypeDefinition $csharp -ReferencedAssemblies "System.Speech"
+try {
+    Add-Type -TypeDefinition $csharp -ReferencedAssemblies "System.Speech" -ErrorAction Stop
+} catch {
+    Write-Host "MIC_ERROR: $_"
+    exit 1
+}
+
 $bridge = New-Object UltronMicBridge
 $bridge.Start()
 
@@ -409,7 +448,7 @@ while ($true) {
             if not transcript:
                 continue
 
-            # Skip if ULTRON is actively speaking through the speakers
+            # Skip if ULTRON is actively speaking through the speakers (echo suppression)
             if _is_speaking.is_set():
                 continue
 
@@ -426,46 +465,58 @@ while ($true) {
 
 
 def _handle_spoken_input(text: str) -> None:
-    """Handle recognized speech from the microphone.
-
-    ULTRON is always in LISTENING mode — every recognisable utterance is
-    processed immediately.  No wake word required.
-    """
+    """Handle recognized speech from the microphone."""
     with _turn_lock:
         if not text:
             return
 
-        # Emergency stop check
-        if EMERGENCY_STOP_PATTERN.match(text):
+        # Check emergency stop
+        if EMERGENCY_STOP_PATTERN.match(text) or text.lower().strip() in ("stop", "emergency stop"):
             trigger_emergency_stop()
             print()
             print(_bold("ULTRON:") + " Emergency stop activated.")
-            speak_text("Emergency stop activated.")
+            speak_text_blocking("Emergency stop activated.")
             print()
-            _show_state("LISTENING")   # stay in LISTENING even after emergency stop
+            _state.active_conversation = False
+            _show_state("STANDBY")
             return
 
-        # Strip wake word prefix if spoken (e.g. "Hey ULTRON open Chrome")
-        clean_text = text
-        match = WAKE_WORD_PATTERN.match(text)
-        if match:
-            remainder = match.group(1)
-            if remainder and remainder.strip():
-                # Command was appended to the wake word — extract it
-                clean_text = remainder.strip()
-            else:
-                # Bare wake word only — acknowledge and stay in LISTENING
+        # Check graceful sleep/standby
+        if EXIT_PATTERN.match(text) and _state.active_conversation:
+            print()
+            print(_bold("ULTRON:") + " Going to standby, sir.")
+            speak_text_blocking("Going to standby, sir.")
+            print()
+            _state.active_conversation = False
+            _show_state("STANDBY")
+            return
+
+        # In STANDBY: requires wake word
+        if not _state.active_conversation or _state.voice_state == "STANDBY":
+            match = WAKE_WORD_PATTERN.match(text)
+            if match:
+                _state.active_conversation = True
+                _state.last_activity = time.time()
                 _show_state("WAKE_DETECTED")
                 greeting = "Yes, sir?"
                 print()
                 print(_bold("ULTRON:") + f" {greeting}")
-                speak_text_blocking(greeting)
+                speak_text_blocking(greeting)   # must finish speaking before LISTENING
                 _show_state("LISTENING")
-                return
+
+                remainder = match.group(1)
+                if remainder and remainder.strip():
+                    execute_turn_locked(remainder.strip())
+            return
+
+        # In ACTIVE CONVERSATION (LISTENING):
+        clean_text = text
+        match = WAKE_WORD_PATTERN.match(text)
+        if match and match.group(1):
+            clean_text = match.group(1).strip()
 
         print()
         print(_cyan(f"  [Spoken Input]: {clean_text}"))
-        _state.active_conversation = True
         execute_turn_locked(clean_text)
 
 
@@ -527,14 +578,14 @@ def _print_startup_dashboard(health: dict) -> None:
     print()
     print("    ULTRON is ready.")
     print()
-    print("    Always-listening mode — no wake word required.")
-    print(_bold('        (Say "Hey ULTRON" or speak any command directly)'))
+    print("    Wake phrase:")
+    print(_bold('        "Hey ULTRON"'))
     print()
-    _state.active_conversation = True
-    _show_state("LISTENING")
+    _state.active_conversation = False
+    _show_state("STANDBY")
     print()
     # Spoken announcement on boot
-    speak_text("ULTRON is online and always listening, sir.")
+    speak_text("ULTRON is online and ready, sir.")
 
 
 def _print_status_detailed(health: dict) -> None:
@@ -568,41 +619,35 @@ def _print_status_detailed(health: dict) -> None:
         print(f"  Speaker Dev         {spk['name']}")
 
     if vstatus:
-        print(f"  Voice Wake Word     {vstatus.get('wake_word', 'Hey ULTRON')}")
-        print(f"  Voice Timeout       {vstatus.get('timeout_seconds', 15.0)}s")
-    print(f"  Voice State         {_state.voice_state}")
-    print(f"  Active Conversation {_state.active_conversation}")
-    print(f"  Backend URL         {BACKEND_URL}")
-    if _state.session_id:
-        print("  Session ID          [active]")
-    print(f"  Conversation        {_state.conversation_id}")
+        print()
+        print(_cyan("  Voice Engine Status:"))
+        print(f"  Voice State         {vstatus.get('state', 'UNKNOWN')}")
+        print(f"  Active Conv         {vstatus.get('active_conversation', False)}")
+        print(f"  Timeout (s)         {vstatus.get('timeout_seconds', 15.0)}")
+        print(f"  Wake Phrase         {vstatus.get('wake_word', 'Hey ULTRON')}")
+
     print()
 
 
 _HELP_TEXT = """
-  ULTRON CLI -- Available commands:
-
-    help       Show this help message
-    status     Display live backend, voice, and session status
-    clear      Clear the terminal screen
-    voice      Enter interactive voice mode
-    voice off  Exit voice mode back to text mode
-    ptt        Activate push-to-talk (Enter LISTENING mode)
-    exit       Cleanly invalidate session and exit
-    quit       Same as exit
-    shutdown   Same as exit
+  ULTRON Command Reference:
+    help              Display this help menu
+    status            Show detailed diagnostic status of all components
+    clear             Clear terminal screen and redraw status dashboard
+    ptt               Push-To-Talk: activate microphone directly without wake word
+    voice             Enter full-screen voice interaction mode
+    exit / quit       Safely shut down ULTRON session and exit
 
   JARVIS Voice Experience:
-    - Say "Hey ULTRON" to wake the assistant.
-    - ULTRON responds "Yes, sir?" and enters LISTENING mode.
-    - Follow-up commands do NOT require the wake word!
-    - After speaking a response, ULTRON automatically returns to LISTENING.
-    - After 15s of inactivity, ULTRON returns to STANDBY.
+    - Say "Hey ULTRON" to wake the assistant from [STANDBY].
+    - ULTRON responds "Yes, sir?" and enters [LISTENING] mode.
+    - Follow-up commands do NOT require repeating the wake word!
+    - After speaking each response, ULTRON automatically returns to [LISTENING].
+    - After 15s of silence/inactivity, ULTRON automatically returns to [STANDBY].
 
   Security note:
-    All commands and voice requests route through the standard
-    ULTRON security pipeline (SafetyGate, ConfirmationBroker,
-    PermissionStore, and AuditLogger). The CLI never auto-approves.
+    All commands route through the standard ULTRON security pipeline
+    (SafetyGate, ConfirmationBroker, PermissionStore, AuditLogger).
 """
 
 
@@ -627,11 +672,12 @@ def execute_turn_locked(user_input: str) -> None:
     # Check emergency stop command
     if EMERGENCY_STOP_PATTERN.match(user_input.strip()):
         trigger_emergency_stop()
-        speak_text("Emergency stop activated.")
+        speak_text_blocking("Emergency stop activated.")
         print()
         print(_bold("ULTRON:") + " Emergency stop activated.")
         print()
-        _show_state("LISTENING")   # stay in LISTENING even after emergency stop
+        _state.active_conversation = False
+        _show_state("STANDBY")
         return
 
     try:
@@ -642,14 +688,16 @@ def execute_turn_locked(user_input: str) -> None:
         print()
         print(_bold("ULTRON:") + f" {answer}")
         print()
-        speak_text_blocking(answer)   # blocks until audio done → then LISTENING
+        speak_text_blocking(answer)   # blocks until audio done -> then LISTENING
         _state.last_activity = time.time()
-        _show_state("LISTENING")   # always return to LISTENING
+        if _state.active_conversation:
+            _show_state("LISTENING")
     except requests.Timeout:
         print()
         print(_yellow("  ULTRON: Request timed out. The backend may still be processing."))
         print()
-        _show_state("LISTENING")
+        if _state.active_conversation:
+            _show_state("LISTENING")
     except RuntimeError as exc:
         msg = str(exc)
         print()
@@ -661,12 +709,14 @@ def execute_turn_locked(user_input: str) -> None:
         else:
             print(_red(f"  ULTRON ERROR: {msg}"))
         print()
-        _show_state("LISTENING")
+        if _state.active_conversation:
+            _show_state("LISTENING")
     except Exception as exc:
         print()
         print(_red(f"  ULTRON ERROR: Unexpected error -- {exc}"))
         print()
-        _show_state("LISTENING")
+        if _state.active_conversation:
+            _show_state("LISTENING")
 
 
 def execute_turn(user_input: str) -> None:
@@ -677,23 +727,23 @@ def execute_turn(user_input: str) -> None:
 def run_voice_loop() -> str:
     """Interactive JARVIS voice loop in CLI."""
     _state.voice_mode = True
-    _state.active_conversation = True
     print()
     print(_cyan("  +==========================================+"))
     print(_cyan("  |") + _bold("             ULTRON VOICE MODE            ") + _cyan("|"))
-    print(_cyan("  |") + "      Always-Listening  •  JARVIS Mode    " + _cyan("|"))
+    print(_cyan("  |") + "         JARVIS Voice Interaction         " + _cyan("|"))
     print(_cyan("  +==========================================+"))
     print()
-    print("  Mode          : ALWAYS LISTENING (no wake word needed)")
-    print('  Optional      : "Hey ULTRON" prefix still accepted')
+    print('  Wake phrase   : "Hey ULTRON" / "ULTRON"')
+    print("  Follow-ups    : Wake word NOT required once active")
+    print("  Inactivity    : Automatic return to STANDBY after timeout")
     print("  Push-To-Talk  : Type 'ptt'")
     print("  Exit voice    : Type 'voice off'")
     print()
-    _show_state("LISTENING")
+    _show_state("STANDBY")
     print()
 
     try:
-        while _state.voice_mode:
+        while _state.voice_mode and not _stop_workers.is_set():
             try:
                 user_input = input(_bold("VOICE > ")).strip()
             except (KeyboardInterrupt, EOFError):
@@ -745,21 +795,31 @@ def run_voice_loop() -> str:
                 user_input = spoken
                 lowered = spoken.lower()
 
-            # Always-listening: strip optional wake word prefix and execute
-            match = WAKE_WORD_PATTERN.match(user_input)
-            if match:
-                remainder = match.group(1)
-                if remainder and remainder.strip():
-                    # Wake word + command in one utterance
-                    user_input = remainder.strip()
-                else:
-                    # Bare wake word typed — acknowledge and keep listening
+            # In STANDBY: check wake word
+            if not _state.active_conversation or _state.voice_state == "STANDBY":
+                match = WAKE_WORD_PATTERN.match(user_input)
+                if match:
+                    _state.active_conversation = True
+                    _state.last_activity = time.time()
+                    _show_state("WAKE_DETECTED")
                     greeting = "Yes, sir?"
                     print()
                     print(_bold("ULTRON:") + f" {greeting}")
                     speak_text_blocking(greeting)
                     _show_state("LISTENING")
+
+                    remainder = match.group(1)
+                    if remainder and remainder.strip():
+                        execute_turn(remainder.strip())
                     continue
+                else:
+                    print(_dim('  [Ignored in STANDBY -- say "Hey ULTRON" or type "ptt"]'))
+                    continue
+
+            # In LISTENING: follow-up commands do NOT require wake word
+            match = WAKE_WORD_PATTERN.match(user_input)
+            if match and match.group(1):
+                user_input = match.group(1).strip()
 
             execute_turn(user_input)
 
@@ -781,6 +841,7 @@ def _reset_emergency_stop_if_needed() -> None:
 
 
 def main() -> None:
+    _stop_workers.clear()
     try:
         _state.auth_token = get_cli_auth_token()
         health = check_backend()
@@ -790,10 +851,7 @@ def main() -> None:
             _state.timeout_seconds = vstatus.get("timeout_seconds", 15.0)
 
         _reset_emergency_stop_if_needed()
-
-        # Always-listening: activate conversation from the start
-        _state.active_conversation = True
-
+        _state.active_conversation = False
         _print_startup_dashboard(health)
     except RuntimeError as exc:
         print(_red(f"  FATAL: {exc}"))
@@ -816,15 +874,14 @@ def main() -> None:
     mic_thread.start()
 
     try:
-        while True:
+        while not _stop_workers.is_set():
             try:
                 user_input = input(_bold("\nULTRON > ")).strip()
             except KeyboardInterrupt:
-                print()
                 break
             except EOFError:
-                print()
-                break
+                time.sleep(0.5)
+                continue
 
             if not user_input:
                 continue
@@ -847,12 +904,15 @@ def main() -> None:
                 _cmd_status()
                 continue
             if cmd == "ptt":
+                _state.active_conversation = True
+                _state.last_activity = time.time()
                 _show_state("LISTENING")
                 print(_green("  [Push-To-Talk Active] Speak your command:"))
                 try:
                     spoken = input(_bold("  Speak > ")).strip()
                 except (KeyboardInterrupt, EOFError):
-                    _show_state("LISTENING")   # back to listening, never standby
+                    _state.active_conversation = False
+                    _show_state("STANDBY")
                     continue
                 if not spoken:
                     continue
@@ -864,23 +924,27 @@ def main() -> None:
                     break
                 continue
 
-            # Strip optional wake word prefix from typed input
+            # Typed wake word or general command
             match = WAKE_WORD_PATTERN.match(user_input)
             if match:
+                _state.active_conversation = True
+                _state.last_activity = time.time()
+                _show_state("WAKE_DETECTED")
+                greeting = "Yes, sir?"
+                print(_bold("ULTRON:") + f" {greeting}")
+                speak_text_blocking(greeting)
+                _show_state("LISTENING")
+
                 remainder = match.group(1)
                 if remainder and remainder.strip():
-                    user_input = remainder.strip()
-                else:
-                    # Bare wake word typed — acknowledge and keep listening
-                    greeting = "Yes, sir?"
-                    print(_bold("ULTRON:") + f" {greeting}")
-                    speak_text_blocking(greeting)
-                    _show_state("LISTENING")
-                    continue
+                    execute_turn(remainder.strip())
+                continue
 
-            # Always execute — no STANDBY gate in text CLI
+            # If in active conversation or typed directly
             execute_turn(user_input)
 
+    except KeyboardInterrupt:
+        pass
     finally:
         _stop_workers.set()
         global _mic_subprocess
@@ -898,3 +962,4 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+

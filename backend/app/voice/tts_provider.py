@@ -1,10 +1,21 @@
+"""
+ULTRON Text-To-Speech Providers.
+
+LocalWindowsTTSProvider: real Windows SAPI speech synthesis using
+System.Speech.Synthesis.SpeechSynthesizer with 'Microsoft David Desktop' voice.
+Synchronous audio playback ensures that transitions to LISTENING only occur
+after speaking has fully finished.
+
+MockTTSProvider: echoes text chunks as byte strings for testing.
+"""
+from __future__ import annotations
+
 import asyncio
 import base64
 import logging
 import os
 import subprocess
 import sys
-import threading
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, Optional
 
@@ -41,7 +52,7 @@ class MockTTSProvider(TTSProvider):
     """A mock provider for testing that echoes text as byte strings."""
 
     def __init__(self):
-        self.queue = asyncio.Queue()
+        self.queue: asyncio.Queue[bytes] = asyncio.Queue()
         self.closed = False
 
     async def stream_text(self, text_chunk: str) -> None:
@@ -69,15 +80,14 @@ class LocalWindowsTTSProvider(TTSProvider):
     Local Windows SAPI Text-To-Speech Provider.
 
     Uses Windows native System.Speech.Synthesis.SpeechSynthesizer to speak
-    through the system audio device without external cloud dependencies.
-    Also emits text/audio chunks onto an internal queue for streaming.
+    through the system audio device. Audio playback blocks during flush() so
+    the voice session only transitions to LISTENING after the speaker is silent.
     """
 
     def __init__(self):
-        self.queue: asyncio.Queue[bytes | None] = asyncio.Queue()
+        self.queue: asyncio.Queue[Optional[bytes]] = asyncio.Queue()
         self.closed = False
         self._text_buffer: list[str] = []
-        self._lock = asyncio.Lock()
 
     async def stream_text(self, text_chunk: str) -> None:
         if not self.closed and text_chunk:
@@ -95,37 +105,32 @@ class LocalWindowsTTSProvider(TTSProvider):
         if self.closed:
             return
 
-        await self.queue.put(b"__FLUSH__")
-
         # Extract full text to speak
         full_text = "".join(self._text_buffer).strip()
         self._text_buffer.clear()
 
-        if not full_text:
-            return
+        if full_text:
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(None, self._speak_sync, full_text)
 
-        # Perform spoken synthesis asynchronously in background daemon thread
-        threading.Thread(
-            target=self._speak_sync,
-            args=(full_text,),
-            daemon=True,
-            name="ultron-sapi-tts",
-        ).start()
+        await self.queue.put(b"__FLUSH__")
 
     def _speak_sync(self, text: str) -> None:
         if sys.platform != "win32" or not text:
             return
 
-        # Clean text for PowerShell execution
-        cleaned = text.replace('"', '""').replace("`", "")
-        # Limit to 1000 characters to prevent excessive duration
+        cleaned = text.replace('"', '""').replace("`", "").replace("$", "")
         if len(cleaned) > 1000:
             cleaned = cleaned[:997] + "..."
 
         ps_code = (
+            "$ProgressPreference = 'SilentlyContinue'; "
             "Add-Type -AssemblyName System.Speech; "
             "$synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; "
+            "$synth.SelectVoice('Microsoft David Desktop'); "
             "$synth.SetOutputToDefaultAudioDevice(); "
+            "$synth.Rate = -2; "
+            "$synth.Volume = 100; "
             f'$synth.Speak("{cleaned}");'
         )
         try:
@@ -139,7 +144,7 @@ class LocalWindowsTTSProvider(TTSProvider):
                     enc,
                 ],
                 capture_output=True,
-                timeout=15,
+                timeout=30,
             )
         except Exception as e:
             logger.warning(f"Local TTS Speak error: {e}")
@@ -162,15 +167,18 @@ def is_tts_available() -> bool:
 
 
 def get_tts_provider() -> TTSProvider:
-    # 1. Check for ElevenLabs key
+    # 1. Explicit mock flag or running inside test suite
+    if (
+        os.getenv("ULTRON_TEST_MOCK_TTS") == "1"
+        or "pytest" in sys.modules
+        or os.getenv("PYTEST_CURRENT_TEST")
+    ):
+        return MockTTSProvider()
+
+    # 2. ElevenLabs key
     key = os.getenv("ELEVENLABS_API_KEY")
     if key and key != "not_configured":
-        # Placeholder for real ElevenLabs connection
         pass
-
-    # 2. Check for explicit mock flag (for pure headless testing)
-    if os.getenv("ULTRON_TEST_MOCK_TTS") == "1":
-        return MockTTSProvider()
 
     # 3. Default to local Windows SAPI TTS on Windows
     if sys.platform == "win32":
