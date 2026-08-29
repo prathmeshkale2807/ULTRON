@@ -51,7 +51,7 @@ $NodeModules = Join-Path $Desktop "node_modules"
 # Constants
 $BackendUrl = "http://127.0.0.1:8756"
 $HealthUrl  = "$BackendUrl/api/health"
-$UiUrl      = "http://127.0.0.1:5173"
+$UiUrl      = "http://127.0.0.1:1420"
 $MaxWaitSec = 30
 $PollMs     = 500
 
