@@ -363,12 +363,94 @@ async def _voice_main(session_id: str, conversation_id: str) -> None:
             print(_bold("ULTRON:") + f" {text}", flush=True)
             print()
 
+    # Check for Gemini API key before starting
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    if not api_key:
+        print(_red("  ERROR: GEMINI_API_KEY is not set in backend/.env"))
+        print(_yellow("  Voice assistant requires a Gemini API key to function."))
+        print(_yellow("  Get one at: https://aistudio.google.com/apikey"))
+        print()
+        print(_dim("  Falling back to text-only mode. Type commands manually."))
+        print()
+        
+        # Fall back to text mode
+        _show_state("STANDBY")
+        try:
+            while True:
+                try:
+                    user_input = input("").strip()
+                except (KeyboardInterrupt, EOFError):
+                    break
+                if not user_input:
+                    continue
+                cmd = user_input.lower()
+                if cmd in ("exit", "quit", "shutdown"):
+                    break
+                if cmd == "clear":
+                    _clear()
+                    try:
+                        health = check_backend()
+                        _print_startup_dashboard(health)
+                    except RuntimeError:
+                        pass
+                    continue
+                if cmd == "help":
+                    _cmd_help()
+                    continue
+                if cmd == "status":
+                    _cmd_status()
+                    continue
+                execute_turn(user_input)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            invalidate_session()
+            print()
+            print(_dim("  ULTRON offline."))
+            print()
+        return
+
     audio = AudioEngine()
     try:
         audio.start()
     except Exception as exc:
         print(_red(f"  ERROR: Could not start audio: {exc}"))
         print(_yellow("  Install sounddevice: pip install sounddevice"))
+        print()
+        print(_dim("  Falling back to text-only mode."))
+        print()
+        
+        # Fall back to text mode
+        _show_state("STANDBY")
+        try:
+            while True:
+                try:
+                    user_input = input("").strip()
+                except (KeyboardInterrupt, EOFError):
+                    break
+                if not user_input:
+                    continue
+                cmd = user_input.lower()
+                if cmd in ("exit", "quit", "shutdown"):
+                    break
+                if cmd == "clear":
+                    _clear()
+                    _print_startup_dashboard(check_backend())
+                    continue
+                if cmd == "help":
+                    _cmd_help()
+                    continue
+                if cmd == "status":
+                    _cmd_status()
+                    continue
+                execute_turn(user_input)
+        except KeyboardInterrupt:
+            pass
+        finally:
+            invalidate_session()
+            print()
+            print(_dim("  ULTRON offline."))
+            print()
         return
 
     live = UltronLive(
