@@ -6,12 +6,15 @@ This is the same pipeline as the reference JARVIS project but wired into
 ULTRON's ConversationManager, tools, security, and audit system.
 
 Architecture:
-  sounddevice mic (PCM 16kHz) --> Gemini Live session --> PCM 24kHz audio out
+  sounddevice mic (PCM 16kHz) --> Wake Word Detection --> Gemini Live session --> PCM 24kHz audio out
                                         |
                                ULTRON tool calls via ConversationManager
 
-No wake word required — Gemini Live handles natural turn detection.
-ULTRON is always listening once started.
+Wake Word Flow (JARVIS-style):
+  - STANDBY: Listening for "Hey ULTRON" only
+  - WAKE_DETECTED: Responds "Yes, sir?" and enters LISTENING
+  - LISTENING: Processes commands without wake word
+  - After 15s silence: Returns to STANDBY
 """
 from __future__ import annotations
 
@@ -19,6 +22,7 @@ import asyncio
 import logging
 import os
 import queue
+import re
 import threading
 from collections import deque
 from typing import Callable, Optional
@@ -45,6 +49,28 @@ Never say 'As an AI...' or 'I cannot...'. Just do it or explain why briefly."""
 
 # Gemini Live model — confirmed working with AUDIO modality
 LIVE_MODEL = os.getenv("ULTRON_LIVE_MODEL", "models/gemini-3.1-flash-live-preview")
+
+# Wake word pattern for "Hey ULTRON" detection
+WAKE_WORD_PATTERN = re.compile(
+    r"(?i)(?:hey\s+|hi\s+|ok\s+|okay\s+|hello\s+)?(?:ultron|altron|ultra|elton|outron|alltron|all\s+tron|electron|oltron|autron)"
+)
+
+# Timeout for returning to STANDBY (seconds)
+CONVERSATION_TIMEOUT = float(os.getenv("VOICE_CONVERSATION_TIMEOUT_SECONDS", "15.0"))
+
+
+class VoiceState:
+    """Voice session state machine (JARVIS-style)."""
+    STANDBY = "STANDBY"
+    WAKE_DETECTED = "WAKE_DETECTED"
+    LISTENING = "LISTENING"
+    PROCESSING = "PROCESSING"
+    SPEAKING = "SPEAKING"
+    CLOSED = "CLOSED"
+    
+    @classmethod
+    def all_states(cls):
+        return [cls.STANDBY, cls.WAKE_DETECTED, cls.LISTENING, cls.PROCESSING, cls.SPEAKING, cls.CLOSED]
 
 
 class AudioEngine:
@@ -204,7 +230,13 @@ class AudioEngine:
 
 class UltronLive:
     """
-    Gemini Live voice session for ULTRON.
+    Gemini Live voice session for ULTRON with JARVIS-style wake word detection.
+
+    Flow:
+      1. STANDBY: Listens for "Hey ULTRON" wake word only
+      2. WAKE_DETECTED: Speaks "Yes, sir?" greeting
+      3. LISTENING: Streams audio to Gemini, processes commands without wake word
+      4. After timeout: Returns to STANDBY
 
     Streams mic audio to Gemini Live, receives audio responses, and routes
     tool calls through ULTRON's ConversationManager (preserving SafetyGate,
@@ -228,13 +260,44 @@ class UltronLive:
         self.session = None
         self._mic_task = None
         self._rx_task  = None
+        
+        # JARVIS-style state machine
+        self.state = VoiceState.STANDBY
+        self.last_activity_time: float = 0
+        self._state_lock = threading.Lock()
 
     def _emit_state(self, state: str) -> None:
+        with self._state_lock:
+            self.state = state
         if self.on_state_change:
             try:
                 self.on_state_change(state)
             except Exception:
                 pass
+
+    def _update_activity(self) -> None:
+        self.last_activity_time = asyncio.get_event_loop().time()
+
+    def _check_timeout(self) -> bool:
+        """Check if conversation has timed out and should return to STANDBY."""
+        if self.state not in (VoiceState.LISTENING, VoiceState.PROCESSING):
+            return False
+        try:
+            now = asyncio.get_event_loop().time()
+            if now - self.last_activity_time > CONVERSATION_TIMEOUT:
+                logger.info("Conversation timeout - returning to STANDBY")
+                return True
+        except RuntimeError:
+            import time
+            now = time.time()
+            if now - self.last_activity_time > CONVERSATION_TIMEOUT:
+                logger.info("Conversation timeout - returning to STANDBY")
+                return True
+        return False
+
+    def _detect_wake_word(self, text: str) -> bool:
+        """Detect if text contains wake word 'Hey ULTRON'."""
+        return WAKE_WORD_PATTERN.search(text) is not None
 
     def _get_config(self):
         from google.genai import types
@@ -289,6 +352,7 @@ class UltronLive:
                 break
 
     async def _receive_one_turn(self) -> None:
+        """Process responses from Gemini Live with JARVIS-style wake word handling."""
         async for response in self.session.receive():
             if not self.running:
                 return
@@ -301,7 +365,32 @@ class UltronLive:
             if content.input_transcription and content.input_transcription.text:
                 text = content.input_transcription.text.strip()
                 if text:
-                    self._emit_state("LISTENING")
+                    self._update_activity()
+                    
+                    # Handle wake word detection in STANDBY mode
+                    if self.state == VoiceState.STANDBY:
+                        if self._detect_wake_word(text):
+                            logger.info(f"Wake word detected: '{text}'")
+                            self._emit_state(VoiceState.WAKE_DETECTED)
+                            
+                            # Speak greeting "Yes, sir?"
+                            greeting = "Yes, sir?"
+                            if self.on_response:
+                                self.on_response(greeting)
+                            
+                            # Send greeting to TTS via audio
+                            await self._speak_text(greeting)
+                            
+                            self._emit_state(VoiceState.LISTENING)
+                            self._update_activity()
+                            continue
+                        else:
+                            # Ignore speech in STANDBY without wake word
+                            logger.debug(f"Ignoring speech in STANDBY: {text}")
+                            continue
+                    
+                    # In LISTENING mode, show transcript
+                    self._emit_state(VoiceState.LISTENING)
                     if self.on_transcript:
                         self.on_transcript(text, True)
 
@@ -315,17 +404,35 @@ class UltronLive:
             if content.model_turn:
                 for part in content.model_turn.parts:
                     if part.inline_data and part.inline_data.data:
-                        self._emit_state("SPEAKING")
+                        self._emit_state(VoiceState.SPEAKING)
                         self.audio.play_audio(part.inline_data.data)
 
             # Barge-in: user spoke while ULTRON was talking
             if content.interrupted:
                 self.audio._clear_playback()
-                self._emit_state("LISTENING")
+                self._emit_state(VoiceState.LISTENING)
+                self._update_activity()
 
             # Turn complete → back to listening
             if content.turn_complete:
-                self._emit_state("LISTENING")
+                self._emit_state(VoiceState.LISTENING)
+                self._update_activity()
+
+    async def _speak_text(self, text: str) -> None:
+        """Speak text using system TTS for greetings (fallback for wake response)."""
+        # For the "Yes, sir?" greeting, we'll use Windows SAPI TTS as immediate feedback
+        # The main conversation audio comes from Gemini Live
+        try:
+            import subprocess
+            # PowerShell SAPI TTS for quick greeting
+            escaped = text.replace("'", "''")
+            subprocess.run(
+                ["powershell", "-Command", f"Add-Type -AssemblyName System.Speech; $s = New-Object System.Speech.Synthesis.SpeechSynthesizer; $s.Speak('{escaped}')"],
+                capture_output=True,
+                timeout=5,
+            )
+        except Exception as e:
+            logger.warning(f"TTS greeting failed: {e}")
 
     async def run(self) -> None:
         from google import genai
@@ -340,28 +447,33 @@ class UltronLive:
         reconnect_delay = 0.5
 
         while self.running:
-            self._emit_state("STANDBY")
-            logger.info(f"Connecting to Gemini Live ({LIVE_MODEL})...")
+            # Start in STANDBY mode - waiting for wake word
+            self.state = VoiceState.STANDBY
+            self._emit_state(VoiceState.STANDBY)
+            logger.info(f"Connecting to Gemini Live ({LIVE_MODEL})... Starting in STANDBY mode.")
 
             try:
                 async with client.aio.live.connect(
                     model=LIVE_MODEL, config=self._get_config()
                 ) as session:
                     self.session = session
-                    self._emit_state("LISTENING")
-                    logger.info("Gemini Live connected. ULTRON is listening.")
+                    # Stay in STANDBY until wake word detected
+                    logger.info("Gemini Live connected. Waiting for 'Hey ULTRON'...")
 
                     self._mic_task = asyncio.create_task(self._mic_loop())
                     self._rx_task  = asyncio.create_task(self._receive_loop())
+                    
+                    # Watchdog task for timeout handling
+                    self._timeout_task = asyncio.create_task(self._timeout_watchdog())
 
                     while self.running and not self._rx_task.done():
                         await asyncio.sleep(0.1)
 
-                    for task in (self._mic_task, self._rx_task):
+                    for task in (self._mic_task, self._rx_task, self._timeout_task):
                         if task:
                             task.cancel()
                     await asyncio.gather(
-                        self._mic_task, self._rx_task, return_exceptions=True
+                        self._mic_task, self._rx_task, self._timeout_task, return_exceptions=True
                     )
                     self.session = None
                     reconnect_delay = 0.5
@@ -373,12 +485,21 @@ class UltronLive:
                 if not self.running:
                     break
                 logger.warning(f"Gemini Live error: {exc}. Reconnecting in {reconnect_delay:.1f}s...")
-                self._emit_state("STANDBY")
+                self._emit_state(VoiceState.STANDBY)
                 await asyncio.sleep(reconnect_delay)
                 reconnect_delay = min(reconnect_delay * 2, 10.0)
 
         self.running = False
-        self._emit_state("CLOSED")
+        self._emit_state(VoiceState.CLOSED)
+
+    async def _timeout_watchdog(self) -> None:
+        """Watchdog that returns to STANDBY after conversation timeout."""
+        while self.running:
+            await asyncio.sleep(1.0)
+            if self._check_timeout():
+                self.state = VoiceState.STANDBY
+                self._emit_state(VoiceState.STANDBY)
+                logger.info("Returned to STANDBY after timeout")
 
     def stop(self) -> None:
         self.running = False
