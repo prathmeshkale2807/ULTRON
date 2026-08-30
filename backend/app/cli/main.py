@@ -231,8 +231,10 @@ def _print_startup_dashboard(health: dict) -> None:
     print()
     print("    ULTRON is ready.")
     print()
-    print("    Speak naturally. No wake word needed.")
-    print(_bold('    Just talk — ULTRON is always listening.'))
+    print("    JARVIS Voice Mode Active:")
+    print(_bold('    Say "Hey ULTRON" to activate.'))
+    print("    After activation, speak commands naturally.")
+    print("    Returns to standby after 15 seconds of silence.")
     print()
 
 
